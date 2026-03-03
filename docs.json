@@ -1,122 +1,112 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "PARC",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#6366F1",
+    "light": "#818CF8",
+    "dark": "#4F46E5"
   },
-  "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/mshoe/PARC"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/mshoe/PARC"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
-              "quickstart",
-              "development"
+              "introduction",
+              "installation",
+              "quickstart"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "concepts/overview",
+              "concepts/parc-loop",
+              "concepts/motion-diffusion",
+              "concepts/motion-tracking",
+              "concepts/data-format"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Guides",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "guides/training-motion-generator",
+              "guides/motion-synthesis",
+              "guides/motion-tracking-controller",
+              "guides/recording-motions",
+              "guides/motionscope-viewer",
+              "guides/configuration"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Resources",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "resources/datasets",
+              "resources/citation",
+              "resources/contributing"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Motion Generation",
             "pages": [
-              "api-reference/introduction"
+              "api/motion-generator/mdm",
+              "api/motion-generator/base-generator",
+              "api/motion-generator/motion-sampler"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Animation",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/anim/motion-lib",
+              "api/anim/kin-char-model"
+            ]
+          },
+          {
+            "group": "Motion Synthesis",
+            "pages": [
+              "api/motion-synthesis/motion-optimization",
+              "api/motion-synthesis/procgen"
+            ]
+          },
+          {
+            "group": "Motion Tracking",
+            "pages": [
+              "api/motion-tracker/environments",
+              "api/motion-tracker/agents",
+              "api/motion-tracker/models"
+            ]
+          },
+          {
+            "group": "Scripts",
+            "pages": [
+              "api/scripts/setup-iter",
+              "api/scripts/train-gen",
+              "api/scripts/kin-gen",
+              "api/scripts/tracker",
+              "api/scripts/phys-record"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

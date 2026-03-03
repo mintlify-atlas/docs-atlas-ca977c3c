@@ -1,0 +1,405 @@
+---
+title: Motion Optimization
+description: API reference for kinematic motion optimization with terrain contact constraints
+---
+
+The motion optimization module provides tools for refining motion sequences through gradient-based optimization. It corrects kinematic issues like ground penetration, enforces contact constraints, and smooths motion while preserving the original character motion.
+
+## Overview
+
+Motion optimization is essential for ensuring physically plausible character motion on terrain. The optimization process:
+
+1. Takes raw motion data (root position, rotation, joint rotations)
+2. Applies multiple loss terms weighted by user-specified parameters
+3. Uses gradient descent to minimize the combined loss
+4. Returns optimized motion that respects terrain geometry and contact constraints
+
+## Core Functions
+
+### motion_contact_optimization
+
+Main optimization function that refines motion sequences to eliminate terrain penetration and enforce contact constraints.
+
+```python
+def motion_contact_optimization(
+    src_motion_frames: motion_util.MotionFrames,
+    body_points: list,
+    terrain: terrain_util.SubTerrain,
+    char_model: kin_char_model.KinCharModel,
+    num_iters: int,
+    step_size: float,
+    w_root_pos: float, 
+    w_root_rot: float, 
+    w_joint_rot: float, 
+    w_smoothness: float, 
+    w_penetration: float, 
+    w_contact: float,
+    w_sliding: float,
+    w_body_constraints: float,
+    w_jerk: float,
+    body_constraints: list,
+    max_jerk: float,
+    exp_name: str,
+    use_wandb: bool,
+    log_file: str
+) -> motion_util.MotionFrames
+```
+
+**Parameters:**
+
+- `src_motion_frames` (MotionFrames): Input motion sequence with root position, rotation, joint rotations, and contacts
+- `body_points` (list): List of sampled points for each body part for collision detection
+- `terrain` (SubTerrain): Heightfield terrain representation
+- `char_model` (KinCharModel): Character kinematic model for forward kinematics
+- `num_iters` (int): Number of optimization iterations (typically 500-2000)
+- `step_size` (float): Adam optimizer learning rate (typically 0.001-0.01)
+- `w_root_pos` (float): Weight for root position preservation loss
+- `w_root_rot` (float): Weight for root rotation preservation loss
+- `w_joint_rot` (float): Weight for joint rotation preservation loss
+- `w_smoothness` (float): Weight for motion smoothness (velocity consistency)
+- `w_penetration` (float): Weight for preventing body-terrain penetration
+- `w_contact` (float): Weight for enforcing contact points touch terrain
+- `w_sliding` (float): Weight for preventing foot sliding during contact
+- `w_body_constraints` (float): Weight for body constraint adherence
+- `w_jerk` (float): Weight for limiting jerk (third derivative of position)
+- `body_constraints` (list): Per-body list of BodyConstraint objects
+- `max_jerk` (float): Maximum allowable jerk magnitude
+- `exp_name` (str): Experiment name for logging
+- `use_wandb` (bool): Enable Weights & Biases logging
+- `log_file` (str): Path to save optimization log
+
+**Returns:**
+
+- `MotionFrames`: Optimized motion sequence
+
+**Example:**
+
+```python
+import parc.motion_synthesis.motion_opt.motion_optimization as motion_opt
+import parc.util.geom_util as geom_util
+
+# Get body points for collision detection
+body_points = geom_util.get_char_point_samples(char_model)
+
+# Optimize motion
+optimized_motion = motion_opt.motion_contact_optimization(
+    src_motion_frames=raw_motion,
+    body_points=body_points,
+    terrain=terrain,
+    char_model=char_model,
+    num_iters=1000,
+    step_size=0.005,
+    w_root_pos=1.0,
+    w_root_rot=1.0,
+    w_joint_rot=1.0,
+    w_smoothness=0.5,
+    w_penetration=100.0,
+    w_contact=10.0,
+    w_sliding=5.0,
+    w_body_constraints=50.0,
+    w_jerk=0.1,
+    body_constraints=None,
+    max_jerk=1000.0,
+    exp_name="terrain_motion_opt",
+    use_wandb=False,
+    log_file="optimization.log"
+)
+```
+
+### simplified_motion_optimization
+
+Lightweight optimization with only basic regularization and jerk penalty.
+
+```python
+def simplified_motion_optimization(
+    src_motion_frames: motion_util.MotionFrames,
+    char_model: kin_char_model.KinCharModel,
+    num_iters: int,
+    step_size: float,
+    w_root_pos: float,
+    w_root_rot: float,
+    w_joint_rot: float,
+    w_jerk: float,
+    exp_name: str = "",
+    use_wandb: bool = False,
+    log_file: str = None
+) -> motion_util.MotionFrames
+```
+
+**Parameters:**
+
+- `src_motion_frames` (MotionFrames): Input motion sequence
+- `char_model` (KinCharModel): Character kinematic model
+- `num_iters` (int): Number of optimization iterations
+- `step_size` (float): Optimizer learning rate
+- `w_root_pos` (float): Root position preservation weight
+- `w_root_rot` (float): Root rotation preservation weight
+- `w_joint_rot` (float): Joint rotation preservation weight
+- `w_jerk` (float): Jerk penalty weight
+- `exp_name` (str): Optional experiment name
+- `use_wandb` (bool): Enable wandb logging
+- `log_file` (str): Optional log file path
+
+**Returns:**
+
+- `MotionFrames`: Optimized motion sequence
+
+**Use Case:** When you need basic motion smoothing without terrain constraints.
+
+## Loss Functions
+
+### motion_terrain_contact_loss
+
+Computes the full multi-objective loss for terrain-aware motion optimization.
+
+```python
+def motion_terrain_contact_loss(
+    tgt_root_pos, tgt_root_rot, tgt_joint_dof,
+    src_root_pos, src_root_rot_quat, src_joint_rot, 
+    src_body_vels, src_body_rot_vels,
+    contacts, terrain: terrain_util.SubTerrain,
+    body_points: List[torch.Tensor],
+    char_model: kin_char_model.KinCharModel,
+    w_root_pos: float,
+    w_root_rot: float,
+    w_joint_rot: float,
+    w_smoothness: float,
+    w_penetration: float,
+    w_contact: float,
+    w_sliding: float,
+    w_body_constraints: float,
+    w_jerk: float,
+    body_constraints: list,
+    max_jerk: float
+) -> Tuple[torch.Tensor, dict]
+```
+
+**Loss Components:**
+
+1. **Root Position Loss**: `||tgt_root_pos - src_root_pos||²` - Keeps root position close to original
+2. **Root Rotation Loss**: `||angle_diff(tgt_rot, src_rot)||²` - Preserves root orientation
+3. **Joint Rotation Loss**: `||angle_diff(tgt_joints, src_joints)||²` - Maintains joint angles
+4. **Smoothness Loss**: `||tgt_vels - src_vels||²` - Enforces velocity consistency
+5. **Penetration Loss**: `sum(clamp(-sdf, max=0))` - Penalizes body-terrain intersection
+6. **Contact Loss**: `sum(sdf * contact_mask)` - Ensures contact bodies touch terrain
+7. **Sliding Loss**: Pseudo-Huber loss on velocity changes during contact
+8. **Body Constraint Loss**: Distance to fixed contact points (e.g., foot placement)
+9. **Jerk Loss**: `sum(clamp(||jerk|| - max_jerk, min=0))` - Limits acceleration changes
+
+**Returns:**
+
+- `loss` (Tensor): Weighted sum of all loss components
+- `losses` (dict): Dictionary mapping LossType enum to individual loss values
+
+### motion_terrain_contact_loss_localized
+
+Memory-optimized variant that processes per-frame heightfield patches instead of the full terrain.
+
+```python
+def motion_terrain_contact_loss_localized(
+    # Same parameters as motion_terrain_contact_loss
+) -> Tuple[torch.Tensor, dict]
+```
+
+**Optimization Strategy:**
+
+- Extracts local heightfield patches centered on character position per frame
+- Reuses patches across all SDF evaluations for that frame
+- Maintains full vectorization while reducing memory footprint
+- Recommended for large terrains (>100x100 grid)
+
+### simplified_motion_loss
+
+Basic loss function without terrain or contact constraints.
+
+```python
+def simplified_motion_loss(
+    tgt_root_pos: torch.Tensor,
+    tgt_root_rot: torch.Tensor,
+    tgt_joint_dof: torch.Tensor,
+    src_root_pos: torch.Tensor,
+    src_root_rot_quat: torch.Tensor,
+    src_joint_rot: torch.Tensor,
+    char_model: kin_char_model.KinCharModel,
+    w_root_pos: float,
+    w_root_rot: float,
+    w_joint_rot: float,
+    w_jerk: float
+) -> Tuple[torch.Tensor, dict]
+```
+
+**Loss Components:**
+- Root position/rotation/joint preservation losses
+- Jerk penalty on body positions
+
+## Constraint System
+
+### BodyConstraint
+
+Dataclass representing a fixed spatial constraint for a body part during specific frames.
+
+```python
+@dataclass
+class BodyConstraint:
+    start_frame_idx: int = 0
+    end_frame_idx: int = 0
+    constraint_point: torch.Tensor = None  # 3D position
+```
+
+**Purpose:** Fixes a body part (e.g., foot) to a specific world-space point during a frame range, preventing unwanted sliding or drift.
+
+### compute_approx_body_constraints
+
+Automatically generates body constraints from contact labels.
+
+```python
+def compute_approx_body_constraints(
+    root_pos, root_rot, joint_rot, contacts, 
+    char_model: kin_char_model.KinCharModel,
+    terrain: terrain_util.SubTerrain
+) -> list
+```
+
+**Process:**
+
+1. Computes forward kinematics to get body positions
+2. Identifies consecutive contact periods for hands and feet
+3. Averages body position during each contact period
+4. Projects constraint point onto terrain surface using gradient descent
+5. Returns per-body list of BodyConstraint objects
+
+**Parameters:**
+
+- `root_pos` (Tensor): Root positions [num_frames, 3]
+- `root_rot` (Tensor): Root rotations [num_frames, 4]
+- `joint_rot` (Tensor): Joint rotations [num_frames, num_joints, 4]
+- `contacts` (Tensor): Binary contact labels [num_frames, num_bodies]
+- `char_model` (KinCharModel): Character model
+- `terrain` (SubTerrain): Terrain for constraint projection
+
+**Returns:**
+
+- `body_constraints` (list): Per-body list of BodyConstraint objects
+
+**Example:**
+
+```python
+# Automatically compute foot and hand constraints
+body_constraints = motion_opt.compute_approx_body_constraints(
+    root_pos=motion.root_pos,
+    root_rot=motion.root_rot,
+    joint_rot=motion.joint_rot,
+    contacts=motion.contacts,
+    char_model=char_model,
+    terrain=terrain
+)
+
+# Use constraints in optimization
+optimized_motion = motion_opt.motion_contact_optimization(
+    src_motion_frames=motion,
+    body_constraints=body_constraints,
+    # ... other parameters
+)
+```
+
+## Loss Type Enumeration
+
+```python
+class LossType(enum.Enum):
+    ROOT_POS_LOSS = 0
+    ROOT_ROT_LOSS = 1
+    JOINT_ROT_LOSS = 2
+    SMOOTHNESS_LOSS = 3
+    PENETRATION_LOSS = 4
+    CONTACT_LOSS = 5
+    SLIDING_LOSS = 6
+    BODY_CONSTRAINT_LOSS = 7
+    JERK_LOSS = 8
+    LOOPING_LOSS = 9
+```
+
+Used as dictionary keys for tracking individual loss components during optimization.
+
+## Utility Functions
+
+### _align_contacts_to_bodies
+
+Expands per-contact-body contact labels to per-body format.
+
+```python
+def _align_contacts_to_bodies(
+    contacts: torch.Tensor,
+    char_model: kin_char_model.KinCharModel,
+    *,
+    device: torch.device
+) -> torch.Tensor
+```
+
+**Purpose:** Some character models distinguish between "contact bodies" (feet, hands) and all bodies. This function broadcasts contact labels to match the full body count.
+
+### build_logger
+
+Creates a WandB logger for optimization tracking.
+
+```python
+def build_logger(
+    log_file: str, 
+    exp_name: str = None, 
+    use_wandb: bool = True
+) -> wandb_logger.WandbLogger
+```
+
+## Optimization Process
+
+The kinematic correction process follows this workflow:
+
+1. **Initialization:**
+   - Clone source motion parameters (root pos/rot, joint DOFs)
+   - Mark all as `requires_grad = True`
+   - Initialize Adam optimizer
+
+2. **Forward Pass:**
+   - Convert exponential map rotations to quaternions
+   - Run forward kinematics to get body positions/rotations
+   - Compute SDF queries for all body points against terrain
+   - Evaluate all loss terms
+
+3. **Backward Pass:**
+   - Compute gradients via autograd
+   - Update parameters using Adam
+   - Log losses every 25 iterations
+
+4. **Return:**
+   - Convert optimized parameters to MotionFrames
+   - Detach gradients and preserve contact labels
+
+## Weight Tuning Guidelines
+
+**Preservation Weights** (1.0-10.0):
+- `w_root_pos`, `w_root_rot`, `w_joint_rot`: Start at 1.0
+- Increase if motion deviates too much from original
+
+**Terrain Weights** (10.0-1000.0):
+- `w_penetration`: Critical, use 100.0+ for hard constraints
+- `w_contact`: Use 10.0-50.0 to ensure feet touch ground
+- `w_sliding`: Use 5.0-20.0 to prevent foot skating
+
+**Smoothness Weights** (0.1-10.0):
+- `w_smoothness`: Use 0.5-2.0 for general smoothing
+- `w_jerk`: Use 0.1-1.0 for subtle acceleration limiting
+
+**Constraint Weights** (10.0-100.0):
+- `w_body_constraints`: Use 50.0 for strong foot fixation
+
+## Performance Considerations
+
+- **Localized Loss:** Use `motion_terrain_contact_loss_localized` for terrains >50x50 to reduce memory
+- **Body Points:** More points = better collision detection but slower (default: ~50 points per body)
+- **Iterations:** 500-1000 typically sufficient, 2000+ for high-quality results
+- **Batch Processing:** Process multiple motions sequentially; optimization is not batched
+
+## Related Modules
+
+- [Procedural Generation](/api/motion-synthesis/procgen) - Path planning for motion synthesis
+- Character Model - Kinematic character representation
+- Terrain Utilities - Heightfield and SDF operations

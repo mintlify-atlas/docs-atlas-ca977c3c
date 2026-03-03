@@ -1,0 +1,494 @@
+---
+title: 'Models'
+description: 'Neural network models for PPO-based motion tracking'
+---
+
+## PPOModel
+
+Base actor-critic model for PPO agents.
+
+### Initialization
+
+```python
+from parc.motion_tracker.learning.ppo_model import PPOModel
+
+model = PPOModel(
+    config=model_config,
+    env=environment
+)
+```
+
+**Parameters:**
+- `config` (dict): Model configuration including:
+  - Network architectures
+  - Activation functions
+  - Action distribution parameters
+- `env`: Environment instance for space dimensions
+
+**Source:** `ppo_model.py:8-13`
+
+### Architecture
+
+Separate actor and critic networks:
+
+```python
+model._actor_layers      # Policy network
+model._action_dist       # Action distribution builder
+model._critic_layers     # Value network
+model._critic_out        # Value output layer (→ 1)
+```
+
+### Configuration
+
+```python
+model_config = {
+    # Network architectures
+    "actor_net": "mlp_512_512",      # MLP with 512x512 hidden units
+    "critic_net": "mlp_512_512",
+    
+    # Activation
+    "activation": "relu",             # "relu", "elu", "tanh"
+    
+    # Actor output
+    "actor_init_output_scale": 0.01,  # Initial output layer scale
+    
+    # Action distribution
+    "actor_std_type": "CONST",        # "CONST", "STATE_DEPENDENT"
+    "action_std": 0.2                 # Initial standard deviation
+}
+```
+
+**Supported network types:**
+- `"mlp_256_256"`: 2-layer MLP with 256 units
+- `"mlp_512_512"`: 2-layer MLP with 512 units
+- `"mlp_1024_512"`: 2-layer MLP with 1024→512 units
+- Custom sizes via configuration
+
+**Source:** `ppo_model.py:25-58`
+
+### Forward Methods
+
+#### eval_actor()
+
+Evaluates the actor network to get action distribution.
+
+```python
+obs = torch.randn(batch_size, obs_dim)
+action_dist = model.eval_actor(obs)
+
+# Sample actions
+actions = action_dist.sample()        # Stochastic
+actions_mode = action_dist.mode       # Deterministic (mean)
+
+# Evaluate log probabilities
+log_probs = action_dist.log_prob(actions)
+
+# Distribution statistics
+entropy = action_dist.entropy()
+mean = action_dist.mean
+std = action_dist.stddev
+```
+
+**Returns:**
+- `action_dist`: Distribution object (GaussianDiag)
+
+**Source:** `ppo_model.py:15-18`
+
+#### eval_critic()
+
+Evaluates the critic network to estimate state value.
+
+```python
+obs = torch.randn(batch_size, obs_dim)
+values = model.eval_critic(obs)
+
+# Returns: [batch_size, 1]
+```
+
+**Returns:**
+- `values` (torch.Tensor): State value estimates
+
+**Source:** `ppo_model.py:20-23`
+
+### Network Building
+
+#### _build_actor()
+
+Constructs the policy network.
+
+```python
+# Actor input dict (ppo_model.py:50-53)
+input_dict = {
+    "obs": obs_space  # gym.spaces.Box
+}
+
+actor_layers = build_net(
+    net_name="mlp_512_512",
+    input_dict=input_dict,
+    activation="relu"
+)
+
+action_dist = DistributionGaussianDiag(
+    in_size=512,
+    action_size=action_dim,
+    std_type=StdType.CONST,
+    init_std=0.2
+)
+```
+
+**Source:** `ppo_model.py:30-37`
+
+#### _build_critic()
+
+Constructs the value network.
+
+```python
+# Critic input dict (ppo_model.py:55-58)
+input_dict = {
+    "obs": obs_space
+}
+
+critic_layers = build_net(
+    net_name="mlp_512_512",
+    input_dict=input_dict,
+    activation="relu"
+)
+
+critic_out = nn.Linear(512, 1)  # Value head
+nn.init.zeros_(critic_out.bias)
+```
+
+**Source:** `ppo_model.py:39-48`
+
+---
+
+## DMPPOModel
+
+Extended model supporting advanced architectures for DeepMimic.
+
+### Initialization
+
+```python
+from parc.motion_tracker.learning.dm_ppo_model import DMPPOModel
+
+model = DMPPOModel(
+    config=model_config,
+    env=dm_environment
+)
+```
+
+**Additional architectures:**
+- Vision Transformer (ViT) for observations
+- CNN-MLP hybrid networks
+- Structured observation processing
+
+**Source:** `dm_ppo_model.py:12-15`
+
+### Supported Architectures
+
+#### MLP (Standard)
+
+```python
+model_config = {
+    "actor_net": "mlp_512_512",
+    "critic_net": "mlp_512_512"
+}
+# Uses base PPOModel implementation
+```
+
+#### Vision Transformer
+
+```python
+model_config = {
+    "actor_net": "dm_vit_small",
+    "critic_net": "dm_vit_small",
+    
+    # ViT-specific parameters
+    "vit_embed_dim": 256,
+    "vit_depth": 4,
+    "vit_num_heads": 4,
+    "vit_mlp_ratio": 4.0
+}
+```
+
+**Architecture:**
+- Tokenizes observations by type
+- Transformer encoder layers
+- Separate actor/critic output heads
+
+**Source:** `dm_ppo_model.py:34-55`
+
+#### CNN-MLP Hybrid
+
+```python
+model_config = {
+    "actor_net": "dm_cnn_mlp",
+    "critic_net": "dm_cnn_mlp",
+    
+    # CNN parameters for heightmap
+    "cnn_channels": [32, 64, 64],
+    "cnn_kernel_sizes": [5, 3, 3],
+    
+    # MLP for other observations
+    "mlp_hidden_sizes": [512, 512]
+}
+```
+
+**Architecture:**
+- CNN processes heightmap observations
+- MLP processes proprioceptive observations
+- Concatenated features feed actor/critic heads
+
+**Source:** `dm_ppo_model.py:56-78`
+
+### Observation Structure
+
+DMPPOModel handles structured observations:
+
+```python
+# Observation shapes from environment
+obs_shapes = env._compute_obs(ret_obs_shapes=True)
+
+# Example structure:
+{
+    "root_obs": {"shape": [13], "use_normalizer": True},
+    "joint_obs": {"shape": [24], "use_normalizer": True},
+    "tar_obs": {"shape": [3, 37], "use_normalizer": True},
+    "tar_contacts": {"shape": [3, 15], "use_normalizer": False},
+    "char_contacts": {"shape": [15], "use_normalizer": False},
+    "hf": {"shape": [441], "use_normalizer": False}
+}
+```
+
+**Processing:**
+1. Parse observation components
+2. Apply component-specific encoders
+3. Aggregate features
+4. Output action distribution / value
+
+**Source:** `dm_ppo_model.py:36-42`
+
+### Action Distribution
+
+#### Gaussian Diagonal Distribution
+
+```python
+action_dist = DistributionGaussianDiag(
+    in_size=hidden_dim,
+    action_size=action_dim,
+    std_type=StdType.CONST,       # Constant std
+    init_std=0.2,
+    init_output_scale=0.01
+)
+
+# State-dependent std:
+std_type=StdType.STATE_DEPENDENT
+```
+
+**Methods:**
+
+```python
+# Sample from distribution
+actions = action_dist.sample()
+
+# Deterministic action (mean)
+actions = action_dist.mode
+
+# Log probability
+log_prob = action_dist.log_prob(actions)
+
+# Entropy (exploration)
+entropy = action_dist.entropy()
+
+# Parameter regularization
+reg_loss = action_dist.param_reg()
+```
+
+**Source:** `dm_ppo_model.py:17-30`
+
+---
+
+## Model Saving and Loading
+
+### Save Model
+
+```python
+# Save full model state
+torch.save({
+    "model_state_dict": model.state_dict(),
+    "optimizer_state_dict": optimizer.state_dict(),
+    "normalizers": {
+        "obs_norm": obs_norm.state_dict(),
+        "a_norm": a_norm.state_dict()
+    },
+    "iteration": iter_num,
+    "sample_count": sample_count
+}, "model.pt")
+```
+
+### Load Model
+
+```python
+checkpoint = torch.load("model.pt")
+
+model.load_state_dict(checkpoint["model_state_dict"])
+optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+obs_norm.load_state_dict(checkpoint["normalizers"]["obs_norm"])
+a_norm.load_state_dict(checkpoint["normalizers"]["a_norm"])
+
+iter_num = checkpoint["iteration"]
+sample_count = checkpoint["sample_count"]
+```
+
+---
+
+## Custom Network Architectures
+
+### Defining Custom Networks
+
+```python
+import torch.nn as nn
+
+class CustomActorNet(nn.Module):
+    def __init__(self, obs_dim, hidden_dim):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(obs_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.LayerNorm(hidden_dim)
+        )
+    
+    def forward(self, obs):
+        return self.layers(obs)
+
+# Register in net_builder
+# Then use in config:
+model_config = {
+    "actor_net": "custom_actor",
+    "critic_net": "mlp_512_512"
+}
+```
+
+### Network Initialization
+
+```python
+# Actor output layer initialization
+actor_output = nn.Linear(hidden_dim, action_dim)
+nn.init.uniform_(
+    actor_output.weight,
+    -init_output_scale,
+    init_output_scale
+)
+nn.init.zeros_(actor_output.bias)
+
+# Critic output initialization
+critic_output = nn.Linear(hidden_dim, 1)
+nn.init.zeros_(critic_output.bias)
+```
+
+---
+
+## Usage Examples
+
+### Basic MLP Model
+
+```python
+model_config = {
+    "actor_net": "mlp_512_512",
+    "critic_net": "mlp_512_512",
+    "activation": "relu",
+    "actor_init_output_scale": 0.01,
+    "actor_std_type": "CONST",
+    "action_std": 0.2
+}
+
+model = PPOModel(model_config, env)
+model = model.to("cuda:0")
+
+# Forward pass
+obs = torch.randn(256, obs_dim, device="cuda:0")
+action_dist = model.eval_actor(obs)
+values = model.eval_critic(obs)
+
+actions = action_dist.sample()
+log_probs = action_dist.log_prob(actions)
+```
+
+### Vision Transformer Model
+
+```python
+model_config = {
+    "actor_net": "dm_vit_small",
+    "critic_net": "dm_vit_small",
+    "activation": "relu",
+    
+    # ViT parameters
+    "vit_embed_dim": 256,
+    "vit_depth": 6,
+    "vit_num_heads": 8,
+    "vit_mlp_ratio": 4.0,
+    "vit_dropout": 0.0,
+    
+    # Action distribution
+    "actor_init_output_scale": 0.01,
+    "actor_std_type": "CONST",
+    "action_std": 0.2
+}
+
+model = DMPPOModel(model_config, dm_env)
+model = model.to("cuda:0")
+
+# Processes structured observations
+obs = env._compute_obs()  # Already structured
+action_dist = model.eval_actor(obs)
+values = model.eval_critic(obs)
+```
+
+### CNN-MLP Model
+
+```python
+model_config = {
+    "actor_net": "dm_cnn_mlp",
+    "critic_net": "dm_cnn_mlp",
+    "activation": "relu",
+    
+    # CNN for heightmap
+    "cnn_channels": [32, 64, 64],
+    "cnn_kernel_sizes": [5, 3, 3],
+    "cnn_strides": [2, 2, 1],
+    
+    # MLP for proprioception
+    "mlp_hidden_sizes": [512, 512],
+    
+    # Action distribution
+    "actor_init_output_scale": 0.01,
+    "actor_std_type": "STATE_DEPENDENT",
+    "action_std": 0.2
+}
+
+model = DMPPOModel(model_config, dm_env)
+model = model.to("cuda:0")
+```
+
+### Model Inspection
+
+```python
+# Count parameters
+total_params = sum(p.numel() for p in model.parameters())
+trainable_params = sum(
+    p.numel() for p in model.parameters() if p.requires_grad
+)
+
+print(f"Total parameters: {total_params:,}")
+print(f"Trainable parameters: {trainable_params:,}")
+
+# Inspect architecture
+print(model)
+
+# Check gradient flow
+for name, param in model.named_parameters():
+    if param.grad is not None:
+        print(f"{name}: grad norm = {param.grad.norm().item():.4f}")
+```

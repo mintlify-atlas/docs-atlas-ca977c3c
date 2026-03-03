@@ -1,0 +1,174 @@
+---
+title: MotionGenerator
+description: Base class for kinematic motion generation models
+---
+
+## Overview
+
+The `MotionGenerator` class is an abstract base class that defines the interface for kinematic motion generation models in PARC. It provides a common API for generating variable-length motion sequences conditioned on various inputs.
+
+## Class Definition
+
+```python
+class MotionGenerator(abc.ABC)
+```
+
+## Constructor
+
+```python
+MotionGenerator(cfg: dict)
+```
+
+<ParamField path="cfg" type="dict" required>
+  Configuration dictionary containing model-specific parameters.
+</ParamField>
+
+## Abstract Methods
+
+### gen_sequence
+
+Generates a motion sequence based on conditioning information.
+
+```python
+@abc.abstractmethod
+def gen_sequence(cond: dict) -> tuple[Any, dict]
+```
+
+<ParamField path="cond" type="dict" required>
+  A dictionary of conditioning information. The exact keys and values depend on the concrete implementation, but typically include:
+  - Previous character states
+  - Goal/objective information
+  - Action ID or label
+  - Environmental observations (e.g., terrain heightmaps)
+  - Target positions or directions
+</ParamField>
+
+**Returns:** A tuple of `(motion_seq, info)` where:
+- `motion_seq`: The generated motion sequence (format depends on implementation)
+- `info`: Additional information dictionary about the generation process
+
+## Implementations
+
+Concrete implementations of `MotionGenerator` include:
+
+- **[MDM](/api/motion-generator/mdm)**: Motion Diffusion Model using transformer-based denoising
+- **CondMDI**: Conditional Motion Diffusion with Inpainting capabilities
+
+## Usage Pattern
+
+```python
+from parc.motion_generator.base_generator import MotionGenerator
+
+class MyMotionGenerator(MotionGenerator):
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        # Initialize model-specific components
+        self.model = build_model(cfg)
+        
+    def gen_sequence(self, cond):
+        """
+        Generate motion sequence from conditions.
+        """
+        # Extract conditioning information
+        prev_states = cond.get('prev_states')
+        target_pos = cond.get('target_pos')
+        observations = cond.get('observations')
+        
+        # Generate motion using your model
+        motion_seq = self.model.generate(
+            prev_states=prev_states,
+            target=target_pos,
+            obs=observations
+        )
+        
+        # Prepare additional info
+        info = {
+            'generation_time': elapsed_time,
+            'num_steps': num_generation_steps,
+        }
+        
+        return motion_seq, info
+```
+
+## Typical Conditioning Options
+
+While the exact conditioning options depend on the implementation, common conditioning inputs include:
+
+### Previous States
+The last N frames of character motion, providing continuity with past motion.
+
+```python
+cond = {
+    'prev_states': previous_motion_frames  # Shape: [batch_size, num_prev_states, state_dim]
+}
+```
+
+### Goal/Target Information
+Target positions, directions, or poses the character should move toward.
+
+```python
+cond = {
+    'target_pos': target_position,      # Target XY position
+    'target_dir': target_direction,     # Target direction vector
+    'target_heading': target_heading,   # Target heading angle
+}
+```
+
+### Action ID
+Discrete action label or category for the desired motion.
+
+```python
+cond = {
+    'action_id': action_index  # Integer action ID
+}
+```
+
+### Environmental Observations
+Perception information about the environment (terrain, obstacles, etc.).
+
+```python
+cond = {
+    'heightmap': terrain_heightmap,     # Local terrain heights
+    'obstacles': obstacle_positions,    # Obstacle locations
+}
+```
+
+## Design Philosophy
+
+The `MotionGenerator` abstraction allows for:
+
+1. **Flexibility**: Different motion generation approaches (diffusion, VAE, GAN, etc.) can share a common interface
+2. **Composability**: Motion generators can be easily swapped or combined in larger systems
+3. **Extensibility**: New conditioning modalities can be added without changing the core interface
+
+## Example: Using a Motion Generator
+
+```python
+from parc.motion_generator.mdm import MDM
+from parc.motion_generator.diffusion_util import MDMKeyType
+
+# Initialize generator
+cfg = load_config('mdm_config.yaml')
+generator = MDM(cfg)
+
+# Prepare conditioning
+cond = {
+    MDMKeyType.PREV_STATE_KEY: prev_motion_data,
+    MDMKeyType.TARGET_KEY: target_direction,
+    MDMKeyType.OBS_KEY: heightmap,
+    # ... additional flags and parameters
+}
+
+# Generate motion
+motion_seq, info = generator.gen_sequence(cond)
+
+# Use generated motion
+for frame in motion_seq:
+    character.set_pose(frame)
+    render_frame()
+```
+
+## See Also
+
+- [MDM](/api/motion-generator/mdm) - Diffusion-based motion generator
+- [MotionSampler](/api/motion-generator/motion-sampler) - Motion data sampling for training

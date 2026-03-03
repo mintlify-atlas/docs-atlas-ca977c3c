@@ -1,0 +1,440 @@
+---
+title: 'Agents'
+description: 'PPO-based reinforcement learning agents for motion tracking'
+---
+
+## PPOAgent
+
+Base Proximal Policy Optimization agent for motion tracking.
+
+### Initialization
+
+```python
+from parc.motion_tracker.learning.ppo_agent import PPOAgent
+
+agent = PPOAgent(
+    config=agent_config,
+    env=environment,
+    device="cuda:0"
+)
+```
+
+**Parameters:**
+- `config` (dict): Agent configuration including:
+  - Learning rates, batch size, training parameters
+  - Model architecture configuration
+- `env`: Environment instance (IGParkourEnv or DeepMimicEnv)
+- `device` (str): PyTorch device
+
+**Source:** `ppo_agent.py:15-20`
+
+### Configuration Parameters
+
+```python
+config = {
+    # Training
+    "update_epochs": 5,
+    "batch_size": 256,
+    "steps_per_iter": 16,
+    "discount": 0.95,
+    "td_lambda": 0.95,
+    
+    # PPO
+    "ppo_clip_ratio": 0.2,
+    "norm_adv_clip": 5.0,
+    
+    # Loss weights
+    "critic_loss_weight": 1.0,
+    "action_bound_weight": 0.0,
+    "action_entropy_weight": 0.0,
+    "action_reg_weight": 0.0,
+    
+    # Exploration
+    "exp_anneal_samples": 200e6,
+    "exp_prob_beg": 1.0,
+    "exp_prob_end": 0.1,
+    
+    # Gradient clipping
+    "clip_grad_norm": true,
+    "max_grad_norm": 0.5,
+    
+    # Critic
+    "critic_loss_type": "L2",  # "L2" or "L1"
+    
+    # Model
+    "model": {
+        "actor_net": "mlp_512_512",
+        "critic_net": "mlp_512_512",
+        "activation": "relu",
+        "actor_init_output_scale": 0.01,
+        "actor_std_type": "CONST",
+        "action_std": 0.2
+    }
+}
+```
+
+**Source:** `ppo_agent.py:22-49`
+
+### Core Methods
+
+#### train_model()
+
+Trains the agent for a specified number of samples.
+
+```python
+agent.train_model(
+    max_samples=100_000_000,
+    out_model_file="output/model.pt",
+    int_output_dir="output/checkpoints",
+    log_file="output/log.txt",
+    logger_type="tensorboard"
+)
+```
+
+**Parameters:**
+- `max_samples` (int): Total environment steps to train
+- `out_model_file` (str): Final model save path
+- `int_output_dir` (str): Checkpoint directory
+- `log_file` (str): Training log file path
+- `logger_type` (str): Logger type ("tensorboard", "wandb")
+
+**Source:** Base implementation in `base_agent.py`, called from training loop
+
+#### test_model()
+
+Evaluates the agent over multiple episodes.
+
+```python
+test_info = agent.test_model(num_episodes=32)
+
+print(f"Mean return: {test_info['mean_return']}")
+print(f"Mean episode length: {test_info['mean_ep_len']}")
+print(f"Episodes evaluated: {test_info['num_eps']}")
+```
+
+**Returns:**
+- `test_info` (dict):
+  - `mean_return`: Average episodic return
+  - `mean_ep_len`: Average episode length
+  - `num_eps`: Number of episodes evaluated
+
+**Source:** Base implementation, used for evaluation
+
+#### step()
+
+Executes a single environment step with the current policy.
+
+```python
+agent.eval_mode()  # Set to evaluation mode
+next_obs, reward, done, info, action, action_info = agent.step()
+
+# action: Selected action [num_envs, action_dim]
+# action_info: dict with "a_logp" and "rand_action_mask"
+```
+
+**Returns:**
+- Environment step outputs plus action and action metadata
+
+**Source:** `ppo_agent.py:339-342`
+
+### Action Selection
+
+#### _decide_action()
+
+Internal method for action selection with exploration.
+
+```python
+action, action_info = agent._decide_action(obs, info)
+
+# Training mode: stochastic with exploration
+# Test mode: deterministic (mode of distribution)
+```
+
+**Exploration annealing:**
+
+```python
+# Probability of random action decreases over training
+exp_prob = (1 - progress) * exp_prob_beg + progress * exp_prob_end
+# progress = sample_count / exp_anneal_samples
+```
+
+**Source:** `ppo_agent.py:84-116`
+
+### Training Iteration
+
+#### _train_iter()
+
+Single training iteration (rollout + update).
+
+```python
+# Internal training loop
+info = agent._train_iter()
+
+# Returns training metrics:
+# - actor_loss, critic_loss
+# - clip_frac, imp_ratio
+# - adv_mean, adv_std
+```
+
+**Process:**
+1. Rollout: Collect experience in buffer
+2. Build training data: Compute advantages and target values
+3. Update: Multiple epochs of PPO updates
+
+**Source:** Base agent implementation
+
+### Loss Computation
+
+#### PPO Actor Loss
+
+```python
+# Clipped surrogate objective (ppo_agent.py:275-296)
+a_ratio = exp(new_logp - old_logp)
+actor_loss0 = adv * a_ratio
+actor_loss1 = adv * clip(a_ratio, 1-ε, 1+ε)
+actor_loss = -mean(min(actor_loss0, actor_loss1))
+
+# Optional regularization
+if action_entropy_weight > 0:
+    actor_loss -= action_entropy_weight * entropy(action_dist)
+if action_reg_weight > 0:
+    actor_loss += action_reg_weight * param_reg(action_dist)
+```
+
+**Source:** `ppo_agent.py:275-327`
+
+#### Critic Loss
+
+```python
+# Value function loss (ppo_agent.py:256-273)
+pred_val = critic(obs)
+diff = target_val - pred_val
+
+if critic_loss_type == "L2":
+    critic_loss = mean(diff²)
+elif critic_loss_type == "L1":
+    critic_loss = mean(|diff|)
+```
+
+**Source:** `ppo_agent.py:256-273`
+
+### Advantage Estimation
+
+```python
+# TD(λ) return computation (ppo_agent.py:124-171)
+next_vals = critic(next_obs)
+target_vals = compute_td_lambda_return(
+    rewards, next_vals, done,
+    discount=0.95, td_lambda=0.95
+)
+
+vals = critic(obs)
+advantages = target_vals - vals
+
+# Normalize advantages
+adv_normalized = (adv - mean(adv)) / std(adv)
+adv_clipped = clip(adv_normalized, -5, 5)
+```
+
+**Source:** `ppo_agent.py:124-171`
+
+---
+
+## DMPPOAgent
+
+Extended PPO agent for DeepMimic environments with tracking error metrics.
+
+### Initialization
+
+```python
+from parc.motion_tracker.learning.dm_ppo_agent import DMPPOAgent
+
+dm_agent = DMPPOAgent(
+    config=config,
+    env=dm_environment,
+    device="cuda:0"
+)
+```
+
+**Additional Features:**
+- Tracking error metrics
+- Motion failure rate logging
+- Contact force recording
+- Environment-specific metadata
+
+**Source:** `dm_ppo_agent.py:17-29`
+
+### Enhanced Training
+
+#### train_model()
+
+```python
+dm_agent.train_model(
+    max_samples=100_000_000,
+    out_model_file="output/dm_model.pt",
+    int_output_dir="output/checkpoints",
+    log_file="output/dm_log.txt",
+    logger_type="wandb"
+)
+
+# Saves checkpoints with failure rates:
+# - model_{iter}.pt
+# - fail_rates_{iter}.pt
+```
+
+**Additional logging:**
+- Motion failure rates per motion ID
+- Failure rate quantiles (25%, 50%, 75%)
+- Mean/max failure rates per motion class
+- Detailed reward component breakdowns
+
+**Source:** `dm_ppo_agent.py:191-233`
+
+### Enhanced Testing
+
+#### test_model()
+
+```python
+test_info = dm_agent.test_model(num_episodes=64)
+
+# Standard metrics
+print(f"Return: {test_info['mean_return']}")
+print(f"Episode length: {test_info['mean_ep_len']}")
+
+# Tracking error metrics (if enabled)
+if env._report_tracking_error:
+    print(f"Root pos error: {test_info['test_mean_root_pos_tracking_err']}")
+    print(f"Root rot error: {test_info['test_mean_root_rot_tracking_err']}")
+    print(f"Body pos error: {test_info['test_mean_body_pos_tracking_err']}")
+    print(f"Body rot error: {test_info['test_mean_body_rot_tracking_err']}")
+    print(f"DOF vel error: {test_info['test_mean_dof_vel_tracking_err']}")
+    print(f"Root vel error: {test_info['test_mean_root_vel_tracking_err']}")
+    print(f"Root ang vel error: {test_info['test_mean_root_ang_vel_err']}")
+```
+
+**Source:** `dm_ppo_agent.py:93-180`
+
+### Experience Buffer Extensions
+
+```python
+# Additional buffer fields (dm_ppo_agent.py:239-264)
+exp_buffer = {
+    "timestep": [buffer_len, num_envs],           # Timestep index
+    "ep_num": [buffer_len, num_envs],             # Episode number
+    "compute_time": [buffer_len, num_envs],       # Computation time
+    "prev_char_contact_forces": [buffer_len, num_envs, 15, 3],
+    "next_char_contact_forces": [buffer_len, num_envs, 15, 3],
+    "env_id": [buffer_len, num_envs]              # Environment ID
+}
+```
+
+**Source:** `dm_ppo_agent.py:239-264`
+
+### Observation Normalization
+
+```python
+# Selective normalization (dm_ppo_agent.py:48-87)
+obs_shapes = env._compute_obs(ret_obs_shapes=True)
+
+for key in obs_shapes:
+    use_normalizer = obs_shapes[key]["use_normalizer"]
+    # Excludes heightmap, contact observations from normalization
+
+normalizer = Normalizer(
+    obs_space.shape,
+    device=device,
+    non_norm_indices=non_normalizable_indices,
+    clip=5.0
+)
+```
+
+**Source:** `dm_ppo_agent.py:48-87`
+
+### Model Building
+
+Inherits from PPOAgent but uses DMPPOModel for advanced architectures.
+
+```python
+# dm_ppo_agent.py:43-46
+model = DMPPOModel(model_config, env)
+# Supports: MLP, CNN-MLP, Vision Transformer architectures
+```
+
+**Source:** `dm_ppo_agent.py:43-46`
+
+---
+
+## Usage Examples
+
+### Basic Training
+
+```python
+import torch
+from parc.motion_tracker.envs.ig_parkour.ig_parkour_env import IGParkourEnv
+from parc.motion_tracker.learning.ppo_agent import PPOAgent
+
+# Create environment
+env = IGParkourEnv(
+    config=env_config,
+    num_envs=4096,
+    device="cuda:0",
+    visualize=False
+)
+
+# Create agent
+agent = PPOAgent(
+    config=agent_config,
+    env=env,
+    device="cuda:0"
+)
+
+# Train
+agent.train_model(
+    max_samples=100_000_000,
+    out_model_file="models/ppo_agent.pt",
+    int_output_dir="checkpoints",
+    log_file="training.log",
+    logger_type="tensorboard"
+)
+```
+
+### DeepMimic Training
+
+```python
+from parc.motion_tracker.learning.dm_ppo_agent import DMPPOAgent
+
+# Environment with DeepMimic
+env_config["env"]["fraction_dm_envs"] = 1.0
+env = IGParkourEnv(env_config, 4096, "cuda:0", False)
+
+# Agent with tracking metrics
+agent_config["report_tracking_error"] = True
+agent = DMPPOAgent(agent_config, env, "cuda:0")
+
+# Train with failure rate logging
+agent.train_model(
+    max_samples=200_000_000,
+    out_model_file="models/dm_ppo_agent.pt",
+    int_output_dir="dm_checkpoints",
+    log_file="dm_training.log",
+    logger_type="wandb"
+)
+```
+
+### Inference
+
+```python
+# Load trained model
+agent.load("models/ppo_agent.pt")
+agent.eval_mode()
+
+# Reset environment
+obs, info = env.reset()
+agent._curr_obs = obs
+agent._curr_info = info
+
+# Run policy
+for _ in range(1000):
+    obs, reward, done, info, action, action_info = agent.step()
+    # Process outputs...
+```

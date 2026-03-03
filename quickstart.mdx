@@ -1,80 +1,351 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick Start
+description: Get up and running with Motionscope viewer to visualize character motions and terrains
 ---
 
-## Get started in three steps
+## What is Motionscope?
 
-Get your documentation site running locally and make your first customization.
+Motionscope is PARC's interactive motion and terrain editor built on top of [Polyscope](https://polyscope.run/py/). It provides a powerful GUI for:
 
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+- Visualizing character animations with terrain
+- Editing motion sequences and contact labels
+- Generating motions using trained MDM models
+- Planning paths and optimizing kinematic motions
+- Real-time kinematic control (with RTX 4090)
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+Motionscope is a standalone tool that can be used independently of the full PARC training pipeline. It's perfect for exploring motion data and understanding character animations.
 </Note>
+
+## Quick Start: Launch Motionscope
+
+Let's get Motionscope running in just a few steps.
+
+<Steps>
+  <Step title="Configure Motion to Load">
+    Before launching Motionscope, edit the configuration file to specify which motion to load:
+    
+    ```yaml PARC/motionscope/motionscope_config.yaml
+    load_mdm: False
+    use_contact_info: True
+    use_legacy_file_format: False
+
+    motions:
+      - ["data/motion_terrains/sfu.pkl", "humanoid"]
+    
+    terrain_mesh_mode: "simple" # [simple, greedy]
+    load_other_motion_terrains: False
+    input_folder_dir: "data/terrains/"
+
+    mdm_filepaths:
+      main: "$DATA_DIR/tests/parc/jan022025/p1_train_gen/checkpoints/model_40000.ckpt"
+    ```
+    
+    <Warning>
+    Make sure the motion file path exists. If you don't have motion data yet, download it from the [PARC HuggingFace dataset](https://huggingface.co/datasets/mxucg/PARC).
+    </Warning>
+  </Step>
+
+  <Step title="Run Motionscope">
+    Launch the viewer from the repository root:
+    
+    ```bash
+    python scripts/run_motionscope.py
+    ```
+    
+    The Polyscope window should open showing your character animation!
+  </Step>
+
+  <Step title="Explore the Interface">
+    Motionscope provides several GUI panels accessible through the sidebar:
+    
+    - **Time GUI**: Motion playback controls (play/pause, frame stepping, timeline scrubbing)
+    - **Motion GUI**: Edit motion sequences and transform characters
+    - **Contact GUI**: Edit contact labels for feet, hands, and body parts
+    - **Terrain GUI**: Modify terrain height at specific points
+    - **MDM GUI**: Generate new motions using loaded diffusion models
+    - **Path Planning GUI**: Create paths using A* on terrain for motion generation
+    - **Optimization GUI**: Kinematic optimization for motion refinement
+  </Step>
+</Steps>
+
+## Keyboard Shortcuts
+
+Motionscope includes convenient keyboard shortcuts for quick editing:
+
+| Key | Action |
+|-----|--------|
+| **Space** | Play motion from beginning |
+| **E** | Jump to end of motion |
+| **N** | Place path node at mouse position |
+| **A** | Set terrain elevation at mouse position |
+| **C** | Set contact body constraint point at mouse position |
+| **G** | Generate motion using loaded MDM model |
+
+## Motion Playback Controls
+
+The **Motion Playback** panel (bottom of screen) provides:
+
+<AccordionGroup>
+  <Accordion title="Playback Options">
+    - **Paused checkbox**: Pause/resume playback
+    - **Looping checkbox**: Enable continuous looping
+    - **Previous Frame / Next Frame buttons**: Step through frames
+    - **Motion time slider**: Scrub through the timeline
+  </Accordion>
+
+  <Accordion title="Motion Information">
+    The panel displays:
+    - Total number of frames
+    - FPS (frames per second)
+    - Current frame index
+    - Motion time in seconds
+  </Accordion>
+</AccordionGroup>
+
+## Loading Your Own Motions
+
+### Option 1: Edit Config File
+
+Modify `PARC/motionscope/motionscope_config.yaml`:
+
+```yaml
+motions:
+  - ["/path/to/your/motion.pkl", "humanoid"]
+```
+
+### Option 2: Use Motion Library
+
+For multiple motions, reference a motion library YAML file:
+
+```yaml
+motion_lib_file: "$DATA_DIR/Data/parkour_dataset_april/initial/motions.yaml"
+```
+
+### Motion File Format
+
+PARC motion files (`.pkl`) contain:
+- Root position and rotation trajectories
+- Joint rotation sequences  
+- Body contact labels
+- FPS and loop mode metadata
+- Optional terrain heightfields
+- Optional path planning data
+
+Files are loaded via `PARC/anim/motion_lib.py:MotionLib` class.
+
+## Visualizing Terrain
+
+Motionscope can display terrain associated with motions:
+
+<Steps>
+  <Step title="Enable Terrain Viewing">
+    In the config, ensure terrain data is included:
+    
+    ```yaml
+    terrain_mesh_mode: "simple"
+    ```
+  </Step>
+
+  <Step title="View Local Heightfield">
+    Open the **Visibility** panel and check:
+    - "View local hf" - Shows the local heightfield around the character
+    - Adjust "Local Heightfield Visibility" slider for transparency
+  </Step>
+
+  <Step title="Edit Terrain Height">
+    Open **Terrain GUI** and:
+    1. Set desired terrain height
+    2. Adjust mouse size (editing radius)
+    3. Press **A** key while hovering over terrain to modify elevation
+  </Step>
+</Steps>
+
+## Using Motion Diffusion Models
+
+If you have a trained MDM checkpoint, you can generate new motions interactively:
+
+<Steps>
+  <Step title="Load MDM Model">
+    Edit the config to enable MDM loading:
+    
+    ```yaml
+    load_mdm: True
+    
+    mdm_filepaths:
+      main: "$DATA_DIR/path/to/model_checkpoint.ckpt"
+    ```
+  </Step>
+
+  <Step title="Configure Generation Parameters">
+    Open the **MDM GUI** panel to configure:
+    - Number of candidates to generate
+    - DDIM sampling stride
+    - Target direction conditioning
+    - Temperature/noise settings
+  </Step>
+
+  <Step title="Generate Motion">
+    Press **G** key to generate a new motion at the current terrain location and target direction.
+    
+    <Note>
+    Real-time generation requires RTX 4090. RTX 3090 will be slower than real-time but still functional.
+    </Note>
+  </Step>
+</Steps>
+
+## Saving Edited Motions
+
+After editing a motion, you can save it:
+
+<Steps>
+  <Step title="Open Saving Panel">
+    Expand the **Saving** tree in the main GUI panel.
+  </Step>
+
+  <Step title="Configure Save Options">
+    Choose what to include:
+    - **Save path with motion**: Include path planning data
+    - **Save motion as loop**: Set loop mode to WRAP
+    - **Save terrain with motion**: Include terrain heightfield
+  </Step>
+
+  <Step title="Save Motion File">
+    Click **Save Current Motion** button. The motion will be saved to:
+    
+    ```
+    output/_motions/new_motion.pkl
+    ```
+    
+    The file includes:
+    - Root position/rotation trajectories (PARC/anim/motion_lib.py:79-81)
+    - Joint rotations (PARC/anim/motion_lib.py:82)
+    - Contact labels (PARC/anim/motion_lib.py:83)
+    - FPS and loop mode metadata (PARC/anim/motion_lib.py:84-85)
+    - Optional terrain data (scripts/run_motionscope.py:351-357)
+  </Step>
+</Steps>
+
+## Advanced Features
+
+### Path Planning GUI
+
+Create navigation paths on terrain for autoregressive motion generation:
+
+1. Open **Path Planning GUI**
+2. Press **N** to place path nodes at mouse positions
+3. Configure A* planning parameters
+4. Generate motion sequence along the path
+
+Path planning uses `PARC/motion_synthesis/procgen/astar.py` with custom terrain graph traversal.
+
+### Kinematic Optimization
+
+Refine motions using inverse kinematics:
+
+1. Open **Optimization GUI**  
+2. Set body constraints for feet, hands, or other body parts
+3. Run optimization to adjust motion while satisfying constraints
+4. Useful for fixing foot sliding or maintaining contact points
+
+### Contact Editing
+
+Edit contact labels frame-by-frame:
+
+<CodeGroup>
+```python Contact Bodies
+# Available contact bodies:
+- Left Foot
+- Right Foot  
+- Left Hand
+- Right Hand
+- Torso
+- Head
+```
+
+```python Frame Range
+# Set editing range
+start_frame = 0
+end_frame = 120
+
+# Set or remove contact label
+# for selected body part
+```
+</CodeGroup>
+
+### Viewing Options
+
+Customize visualization in the **Visibility** panel:
+
+- **Motion sequence**: Show/hide skeleton sequence overlay
+- **Shadow**: Character projection on ground plane
+- **Body points**: Display joint positions
+- **Target direction**: Arrow showing movement direction
+- **Origin axes**: XYZ axes at world origin
+
+## Troubleshooting
+
+### Motionscope Won't Launch
+
+**Issue**: Script fails to start or shows OpenGL errors
+
+**Solution**:
+- Ensure you have OpenGL support (required by Polyscope)
+- On headless servers, use X11 forwarding: `ssh -X user@host`
+- Check that Python can import polyscope: `python -c "import polyscope"`
+
+### Motion File Not Found
+
+**Issue**: `FileNotFoundError` when launching
+
+**Solution**:
+1. Verify the path in `motionscope_config.yaml` exists
+2. Use absolute paths or paths relative to repo root
+3. Download sample data from [HuggingFace](https://huggingface.co/datasets/mxucg/PARC)
+4. For `$DATA_DIR` paths, ensure `user_config.yaml` is configured
+
+### MDM Model Won't Load
+
+**Issue**: Errors loading checkpoint file
+
+**Solution**:
+- Ensure `load_mdm: True` in config
+- Verify checkpoint path is correct and file exists
+- Check PyTorch version compatibility (requires 2.2.0)
+- Ensure CUDA is available if model was trained on GPU
+
+### Isaac Gym Import Errors on Non-Linux
+
+**Issue**: Import errors for `isaacgym` on Windows/macOS
+
+**Solution**: This is expected - the script detects the platform:
+
+```python scripts/run_motionscope.py:12-19
+if platform.system() == "Linux":
+    print("Running on Linux, importing isaac gym")
+    g_running_on_linux = True
+    import isaacgym.gymapi as gymapi
+else:
+    g_running_on_linux = False
+```
+
+Isaac Gym features are disabled on non-Linux platforms. Core Motionscope functionality still works.
+
+## Next Steps
+
+Now that you're familiar with Motionscope, explore:
+
+<CardGroup cols={2}>
+  <Card title="PARC Training Loop" icon="rotate" href="/concepts/parc-loop">
+    Learn the 4-stage iterative training process
+  </Card>
+  <Card title="Motion Generation" icon="wand-magic-sparkles" href="/guides/training-motion-generator">
+    Train your own motion diffusion models
+  </Card>
+  <Card title="Physics Tracking" icon="running" href="/guides/motion-tracking-controller">
+    Train tracking controllers in Isaac Gym
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/motion-generator/mdm">
+    Explore PARC's Python API
+  </Card>
+</CardGroup>

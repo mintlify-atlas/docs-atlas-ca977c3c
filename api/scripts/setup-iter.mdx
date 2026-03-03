@@ -1,0 +1,158 @@
+---
+title: "parc_0_setup_iter.py"
+description: "Set up configuration files for a PARC iteration"
+---
+
+## Overview
+
+The `parc_0_setup_iter.py` script initializes and configures all the necessary files for running a complete PARC iteration. It creates configuration files for all four main PARC stages (train gen, kin gen, tracker, phys record) based on a master setup configuration.
+
+## Purpose
+
+This script:
+- Generates configuration files for each of the 4 PARC pipeline stages
+- Sets up directory structure for outputs
+- Configures dataset paths and model checkpoints
+- Computes sampling weights for different motion types
+- Pre-computes terrain data for augmentation during MDM training
+
+## Usage
+
+### Basic Command
+
+```bash
+python scripts/parc_0_setup_iter.py --config path/to/setup_config.yaml
+```
+
+### Default Configuration
+
+If no config is provided, the script uses the default:
+
+```bash
+python scripts/parc_0_setup_iter.py
+# Uses: data/configs/parc_0_setup_iter_config.yaml
+```
+
+## Command-Line Arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--config` | No | Path to the setup configuration YAML file |
+
+## Configuration Parameters
+
+### Output Control
+
+- **`output_dir`**: Base directory for all PARC iteration outputs
+- **`write_train_gen`**: Boolean flag to write train gen configs
+- **`write_kin_gen`**: Boolean flag to write kinematic generation configs
+- **`write_tracker`**: Boolean flag to write tracker configs
+- **`write_phys_record`**: Boolean flag to write physics recording configs
+
+### Stage 1: Train Gen Configuration
+
+- **`input_mdm_config_path`**: Path to MDM training config template
+- **`input_mdm_model_path`**: Path to previous MDM model checkpoint (null for first iteration)
+- **`input_sampler_stats_path`**: Path to sampler statistics file for normalization (null for first iteration)
+- **`input_create_dataset_config_path`**: Path to dataset creation config
+- **`iter_start_dataset_path`**: Path where the iteration dataset will be saved
+- **`input_dataset_folder_paths`**: List of folders containing motion data
+
+### Stage 2: Kin Gen Configuration
+
+- **`input_kin_gen_config_path`**: Path to kinematic generation config template
+- **`kin_gen_num_batches_of_motions`**: Number of parallel generation jobs (e.g., 10)
+- **`kin_gen_num_motions_per_batch`**: Motions generated per batch (e.g., 50)
+- **`kin_gen_motion_id_offset`**: Starting ID for generated motions (e.g., 0, 3500)
+- **`kin_gen_save_name`**: Base name for saved motion files
+- **`kin_gen_procgen_mode`**: Terrain generation mode: "BOXES", "PATHS", "STAIRS", or "FILE"
+- **`kin_gen_start_heading_mode`**: Character heading initialization: "auto" or "random"
+
+### Stage 3: Tracker Configuration
+
+- **`input_tracker_config_path`**: Path to tracker training config template
+- **`input_tracker_model_path`**: Path to previous tracker model (null for first iteration)
+
+### Stage 4: Phys Record Configuration
+
+- **`input_phys_record_config_path`**: Path to physics recording config template
+
+## Example Configuration
+
+```yaml
+output_dir: "$DATA_DIR/experiments/parc/iteration_1/"
+
+write_train_gen: true
+write_kin_gen: true
+write_tracker: true
+write_phys_record: true
+
+##### PARC 1 - TRAIN GEN #####
+input_mdm_config_path: "data/configs/parc_1_train_gen_default.yaml"
+input_mdm_model_path: null  # First iteration
+input_sampler_stats_path: null
+
+input_create_dataset_config_path: "data/configs/create_dataset_config.yaml"
+iter_start_dataset_path: "$DATA_DIR/experiments/parc/iteration_1/motions.yaml"
+input_dataset_folder_paths:
+  - "$DATA_DIR/initial_dataset/"
+
+##### PARC 2 - KIN GEN #####
+input_kin_gen_config_path: "data/configs/parc_2_kin_gen_default.yaml"
+kin_gen_num_batches_of_motions: 10
+kin_gen_num_motions_per_batch: 50
+kin_gen_motion_id_offset: 0
+kin_gen_save_name: "terrain_motion"
+kin_gen_procgen_mode: "BOXES"
+kin_gen_start_heading_mode: "random"
+
+##### PARC 3 - TRACKER #####
+input_tracker_config_path: "data/configs/parc_3_tracker_default.yaml"
+input_tracker_model_path: null  # First iteration
+
+##### PARC 4 - PHYS RECORD #####
+input_phys_record_config_path: "data/configs/parc_4_phys_record_default.yaml"
+```
+
+## Output Structure
+
+The script creates the following directory structure:
+
+```
+output_dir/
+├── p1_train_gen/
+│   ├── mdm_config.yaml
+│   ├── mdm_config_<timestamp>.yaml
+│   └── create_dataset_config.yaml
+├── p2_kin_gen/
+│   ├── <motion_name>_<start_id>_<end_id>/
+│   │   └── kin_gen_config.yaml
+│   └── ignore/raw/...
+├── p3_tracker/
+│   ├── tracker.yaml
+│   ├── tracker_<timestamp>.yaml
+│   └── create_dataset_config.yaml
+└── p4_phys_record/
+    ├── phys_record.yaml
+    ├── phys_record_<timestamp>.yaml
+    └── create_dataset_config.yaml
+```
+
+## Usage in PARC Pipeline
+
+This script should be run **before** starting each PARC iteration:
+
+```bash
+# 1. Set up configs for iteration
+python scripts/parc_0_setup_iter.py --config my_parc_setup.yaml
+
+# 2. Run the four PARC stages
+python scripts/parc_1_train_gen.py --config output_dir/p1_train_gen/mdm_config.yaml
+python scripts/parc_2_kin_gen.py --config output_dir/p2_kin_gen/<motion_batch>/kin_gen_config.yaml
+python scripts/parc_3_tracker.py --config output_dir/p3_tracker/tracker.yaml
+python scripts/parc_4_phys_record.py --config output_dir/p4_phys_record/phys_record.yaml
+```
+
+## Location
+
+`scripts/parc_0_setup_iter.py`

@@ -1,0 +1,210 @@
+---
+title: "parc_3_tracker.py"
+description: "Train a physics-based motion tracking controller in Isaac Gym"
+---
+
+## Overview
+
+The `parc_3_tracker.py` script trains a physics-based tracking controller that learns to imitate the kinematic reference motions in a physics simulator. It uses reinforcement learning (PPO) in Isaac Gym to train an agent to track motions across various terrains.
+
+## Purpose
+
+This is **Stage 3** of the PARC pipeline. It:
+- Trains a physics-based tracking controller using RL
+- Learns to track all motions in the dataset simultaneously
+- Handles terrain-motion pairs in a grid layout in the simulator
+- Outputs a trained policy model that can track reference motions
+- Generates environment and agent configuration files
+
+## Usage
+
+### Basic Command
+
+```bash
+python scripts/parc_3_tracker.py --config path/to/tracker_config.yaml
+```
+
+### Default Configuration
+
+```bash
+python scripts/parc_3_tracker.py
+# Uses: data/configs/parc_3_tracker_default.yaml
+```
+
+## Command-Line Arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--config` | No | Path to the tracker training configuration YAML file |
+
+## Key Configuration Parameters
+
+### Training Settings
+
+- **`max_samples`**: Maximum number of environment samples for training
+- **`num_envs`**: Number of parallel environments to simulate
+- **`device`**: Training device (e.g., "cuda:0", "cpu")
+
+### Environment and Agent Configuration
+
+- **`env_config`**: Path to environment configuration YAML file
+- **`agent_config`**: Path to agent/policy configuration YAML file
+
+### Model Paths
+
+- **`in_model_file`**: Path to pretrained model for fine-tuning (optional, use "None" or null for training from scratch)
+- **`dataset_file`**: Path to motion dataset YAML file
+- **`output_dir`**: Directory for saving model checkpoints and logs
+
+### Dataset Creation
+
+- **`create_dataset_config`**: Path to dataset creation config (optional, creates dataset before training)
+
+## Training Process
+
+### Dataset Preparation
+
+If `create_dataset_config` is provided, the script:
+1. Loads the dataset creation configuration
+2. Merges motion folders from previous stages (initial dataset + generated motions)
+3. Creates a unified motion dataset YAML file
+
+### Environment Setup
+
+The script creates a DeepMimic-style tracking environment where:
+- Each motion-terrain pair is assigned a location in a grid layout
+- Multiple agents train in parallel, each tracking different reference motions
+- The environment loads terrains and reference motions from the dataset
+
+### Policy Training
+
+The training uses PPO (Proximal Policy Optimization) with:
+- Motion tracking rewards based on pose similarity
+- Contact rewards for matching ground contacts
+- Early termination for failed tracking attempts
+- Normalizer for state observations (computed from data or loaded from checkpoint)
+
+## Example Configuration
+
+```yaml
+# Training parameters
+max_samples: 100000000  # 100M samples
+num_envs: 4096  # Parallel environments
+device: "cuda:0"
+
+# Configuration files
+env_config: "configs/tracker_env.yaml"
+agent_config: "configs/tracker_agent.yaml"
+
+# Dataset
+dataset_file: "$DATA_DIR/iteration_1/p3_tracker/motions.yaml"
+create_dataset_config: "$DATA_DIR/iteration_1/p3_tracker/create_dataset_config.yaml"
+
+# Model paths
+in_model_file: null  # Train from scratch (first iteration)
+# in_model_file: "$DATA_DIR/iteration_0/p3_tracker/model.pt"  # Fine-tune from previous
+
+# Output
+output_dir: "$DATA_DIR/iteration_1/p3_tracker"
+```
+
+## Output Files
+
+After training, the following files are created:
+
+```
+output_dir/
+├── model.pt                 # Final trained model
+├── dm_env.yaml             # Generated environment config
+├── agent_config.yaml       # Generated agent config
+├── log.txt                 # Training log
+├── train_args.txt          # Training arguments used
+├── terrain.pkl             # Saved terrain data
+└── checkpoints/
+    ├── checkpoint_1000000.pt
+    ├── checkpoint_2000000.pt
+    └── ...                 # Intermediate checkpoints
+```
+
+## Environment Configuration
+
+The environment config specifies:
+- Motion dataset file path
+- Terrain generation/loading settings
+- Reward function weights
+- Early termination conditions
+- Observation and action spaces
+
+## Agent Configuration
+
+The agent config specifies:
+- Policy network architecture
+- PPO hyperparameters (learning rate, clip epsilon, etc.)
+- Value function settings
+- Normalizer samples (set to 0 when fine-tuning)
+
+## Training from Previous Iteration
+
+For iterations after the first, you should load the previous tracker as a starting point:
+
+```yaml
+in_model_file: "$DATA_DIR/iteration_1/p3_tracker/model.pt"
+```
+
+When loading a pretrained model:
+- The agent config should set `normalizer_samples: 0` (automatically handled by script)
+- This enables faster convergence on the expanded dataset
+- The policy continues learning from where it left off
+
+## Implementation Details
+
+### Key Files
+
+- **`scripts/run_tracker.py`**: Main RL training loop implementation
+- **`parc/motion_tracker/envs/ig_parkour/ig_parkour_env.py`**: Main Isaac Gym environment
+- **`parc/motion_tracker/envs/ig_parkour/dm_env.py`**: DeepMimic-style tracking sub-environment
+
+### Grid Layout
+
+The simulator arranges terrain-motion pairs in a grid to avoid numerical issues with large coordinate values. This is more stable than a linear arrangement when training on thousands of motions.
+
+### Normalizer
+
+When training from scratch:
+- The agent collects random samples to compute observation normalization statistics
+- This improves training stability
+
+When fine-tuning:
+- The normalizer is loaded from the checkpoint
+- No additional samples are needed (`normalizer_samples: 0`)
+
+## Hardware Requirements
+
+Training the tracker requires:
+- NVIDIA GPU with CUDA support
+- Isaac Gym installation (see PARC README for setup)
+- Sufficient GPU memory for parallel environments (typically 8GB+ for 4096 envs)
+
+## Usage in PARC Pipeline
+
+```bash
+# Stage 2: Generate motions
+python scripts/parc_2_kin_gen.py --config configs/kin_gen.yaml
+
+# Stage 3: Train tracker (THIS SCRIPT)
+python scripts/parc_3_tracker.py --config configs/tracker.yaml
+
+# Stage 4: Record physics motions
+python scripts/parc_4_phys_record.py --config configs/phys_record.yaml
+```
+
+## Monitoring Training
+
+Training progress can be monitored through:
+- Console output showing rewards and episode statistics
+- `log.txt` file in the output directory
+- TensorBoard (if enabled in agent config)
+
+## Location
+
+`scripts/parc_3_tracker.py`

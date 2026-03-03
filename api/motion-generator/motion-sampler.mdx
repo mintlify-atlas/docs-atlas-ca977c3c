@@ -1,0 +1,270 @@
+---
+title: MotionSampler
+description: Samples motion data from a motion library for training and evaluation
+---
+
+## Overview
+
+The `MotionSampler` class provides an interface for sampling motion sequences from a motion library. It handles motion data extraction, temporal sampling, and batching for training motion generation models.
+
+## Class Definition
+
+```python
+class MotionSampler
+```
+
+## Constructor
+
+```python
+MotionSampler(cfg: dict)
+```
+
+<ParamField path="cfg" type="dict" required>
+  Configuration dictionary for the motion sampler.
+</ParamField>
+
+### Configuration Keys
+
+<ParamField path="cfg.device" type="str" required>
+  Device to use for tensors ('cuda' or 'cpu')
+</ParamField>
+
+<ParamField path="cfg.char_file" type="str" required>
+  Path to the character model XML file
+</ParamField>
+
+<ParamField path="cfg.motion_lib_file" type="str | MotionLib" required>
+  Path to motion library file or MotionLib instance
+</ParamField>
+
+## Attributes
+
+<ParamField path="_device" type="str">
+  Device for tensor operations
+</ParamField>
+
+<ParamField path="_seq_len" type="int">
+  Length of motion sequences to sample (set after initialization)
+</ParamField>
+
+<ParamField path="_fps" type="float">
+  Frames per second for motion sampling (set after initialization)
+</ParamField>
+
+<ParamField path="_kin_char_model" type="KinCharModel">
+  Kinematic character model for the motion data
+</ParamField>
+
+<ParamField path="_mlib" type="MotionLib">
+  Motion library containing all motion clips
+</ParamField>
+
+<ParamField path="_motion_lib_file" type="str | MotionLib">
+  Path or instance of the motion library
+</ParamField>
+
+<ParamField path="_random_start_times" type="bool">
+  Whether to randomly sample start times within motions
+</ParamField>
+
+## Methods
+
+### check_init
+
+Verifies that required attributes have been initialized.
+
+```python
+check_init()
+```
+
+Raises an assertion error if `_seq_len` or `_fps` have not been set.
+
+### get_seq_len
+
+Returns the sequence length.
+
+```python
+get_seq_len() -> int
+```
+
+**Returns:** The length of motion sequences being sampled.
+
+### _sample_motion_start_times
+
+Samples start times for motion clips.
+
+```python
+_sample_motion_start_times(
+    motion_ids: torch.Tensor,
+    seq_duration: float
+) -> torch.Tensor
+```
+
+<ParamField path="motion_ids" type="torch.Tensor" required>
+  Tensor of motion IDs to sample from, shape [batch_size]
+</ParamField>
+
+<ParamField path="seq_duration" type="float" required>
+  Duration of the sequence in seconds
+</ParamField>
+
+**Returns:** Tensor of start times for each motion, shape [batch_size].
+
+**Behavior:**
+- For motions with `LoopMode.WRAP`: Samples uniformly from entire motion duration
+- For motions with `LoopMode.CLAMP`: Samples uniformly ensuring enough frames remain
+- If `_random_start_times` is False: Returns zeros (always start from beginning)
+
+### _extract_motion_data
+
+Extracts motion data for specified motion IDs and start times.
+
+```python
+_extract_motion_data(
+    motion_ids: torch.Tensor,
+    motion_start_times: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]
+```
+
+<ParamField path="motion_ids" type="torch.Tensor" required>
+  Tensor of motion IDs, shape [batch_size]
+</ParamField>
+
+<ParamField path="motion_start_times" type="torch.Tensor" required>
+  Tensor of start times in seconds, shape [batch_size]
+</ParamField>
+
+**Returns:** Tuple of:
+- `motion_samples`: Motion data tensor of shape [batch_size, seq_len, num_dof]
+- `contacts`: Contact labels of shape [batch_size, seq_len, num_rb]
+
+**Processing:**
+1. Samples frames from motion library at specified times
+2. Converts quaternion rotations to exponential map representation
+3. Converts joint rotations to DOF representation
+4. Concatenates root position, root rotation, and joint rotations
+5. Reshapes into batch format
+
+## Usage Example
+
+```python
+import torch
+from parc.motion_generator.motion_sampler import MotionSampler
+from parc.anim.motion_lib import MotionLib
+
+# Configuration
+cfg = {
+    'device': 'cuda',
+    'char_file': 'data/characters/humanoid.xml',
+    'motion_lib_file': 'data/motions/motion_lib.yaml'
+}
+
+# Initialize sampler
+sampler = MotionSampler(cfg)
+
+# Set sequence parameters (typically done by the motion generator)
+sampler._seq_len = 64
+sampler._fps = 30.0
+sampler._random_start_times = True
+
+# Get number of motions
+num_motions = sampler._mlib.num_motions()
+print(f"Loaded {num_motions} motion clips")
+
+# Sample random motions
+batch_size = 32
+motion_ids = sampler._mlib.sample_motions(batch_size)
+
+# Sample start times
+seq_duration = sampler._seq_len / sampler._fps  # Duration in seconds
+start_times = sampler._sample_motion_start_times(motion_ids, seq_duration)
+
+# Extract motion data
+motion_samples, contacts = sampler._extract_motion_data(motion_ids, start_times)
+
+print(f"Motion samples shape: {motion_samples.shape}")  # [32, 64, num_dof]
+print(f"Contacts shape: {contacts.shape}")              # [32, 64, num_rb]
+```
+
+## Integration with Motion Generators
+
+Motion generators like MDM use `MotionSampler` to load training data:
+
+```python
+from parc.motion_generator.mdm import MDM
+from parc.motion_generator.motion_sampler import MotionSampler
+
+# Create sampler
+sampler_cfg = {
+    'device': 'cuda',
+    'char_file': 'path/to/character.xml',
+    'motion_lib_file': 'path/to/motions.yaml'
+}
+motion_sampler = MotionSampler(sampler_cfg)
+
+# Create and train MDM model
+mdm_cfg = {...}  # MDM configuration
+mdm = MDM(mdm_cfg)
+mdm.train(motion_sampler, checkpoint_dir='checkpoints/')
+```
+
+## Motion Library Integration
+
+The sampler integrates with the `MotionLib` class:
+
+```python
+from parc.anim.motion_lib import MotionLib, LoopMode
+
+# Load motion library
+mlib = MotionLib.from_file(
+    motion_file='motions.yaml',
+    char_model=char_model,
+    device='cuda',
+    contact_info=True
+)
+
+# Use with sampler
+cfg = {
+    'device': 'cuda',
+    'char_file': 'character.xml',
+    'motion_lib_file': mlib  # Pass MotionLib instance directly
+}
+sampler = MotionSampler(cfg)
+```
+
+## Motion Data Format
+
+The extracted motion data is structured as:
+
+### Motion Samples
+Concatenated tensor containing:
+- **Root position**: XYZ coordinates of character root (3 values)
+- **Root rotation**: Exponential map representation (3 values)
+- **Joint rotations**: DOF values for all joints (num_joints × dof_per_joint)
+
+### Contacts
+Binary contact labels for each rigid body:
+- 1.0: Body is in contact with ground
+- 0.0: Body is not in contact
+
+## Loop Modes
+
+The sampler respects motion loop modes:
+
+- **WRAP**: Motion repeats cyclically, can sample any start time
+- **CLAMP**: Motion stops at end, start time limited to ensure full sequence fits
+
+```python
+# Example: Different sampling behavior
+motion_length = 2.0  # seconds
+seq_duration = 1.0   # seconds
+
+# WRAP mode: can start at t=1.5, wraps to beginning
+# CLAMP mode: max start time is 1.0 (2.0 - 1.0)
+```
+
+## See Also
+
+- [MDM](/api/motion-generator/mdm) - Uses MotionSampler for training
+- [MotionLib](/api/anim/motion-lib) - Underlying motion library
+- [KinCharModel](/api/anim/kin-char-model) - Character kinematic model

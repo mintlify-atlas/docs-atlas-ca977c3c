@@ -1,0 +1,365 @@
+---
+title: 'Environments'
+description: 'PARC motion tracking environment classes for reinforcement learning'
+---
+
+## IGParkourEnv
+
+The main Isaac Gym environment for motion tracking and parkour tasks.
+
+### Initialization
+
+```python
+from parc.motion_tracker.envs.ig_parkour.ig_parkour_env import IGParkourEnv
+
+env = IGParkourEnv(
+    config=config,
+    num_envs=4096,
+    device="cuda:0",
+    visualize=False
+)
+```
+
+**Parameters:**
+- `config` (dict): Environment configuration containing:
+  - `env`: Environment-specific settings
+  - Character model, terrain, observation/action spaces
+- `num_envs` (int): Number of parallel environments
+- `device` (str): PyTorch device ("cuda:0" or "cpu")
+- `visualize` (bool): Enable visualization and rendering
+
+**Source:** `ig_parkour_env.py:40-149`
+
+### Key Attributes
+
+```python
+env._num_envs              # Number of parallel environments
+env._device                # PyTorch device
+env._visualize             # Visualization enabled flag
+env._num_dm_envs           # Number of DeepMimic environments
+env._termination_height    # Height threshold for termination
+env._episode_length        # Maximum episode length
+env._timestep              # Simulation timestep duration
+```
+
+### Observation Space
+
+Observations include:
+- **Root state**: Position, rotation, velocity, angular velocity
+- **Joint rotations**: Character joint angles
+- **DOF velocities**: Joint velocities
+- **Key body positions**: End effector positions
+- **Target observations**: Future reference motion states (if enabled)
+- **Contact information**: Binary contact states (if enabled)
+- **Heightmap**: Local terrain height field
+
+```python
+obs_space = env.get_obs_space()
+obs = env._compute_obs()  # Returns [num_envs, obs_dim] tensor
+```
+
+**Source:** `ig_parkour_env.py:842-965`
+
+### Action Space
+
+```python
+action_space = env.get_action_space()
+# Returns gym.spaces.Box with shape [dof_size]
+```
+
+Actions are joint torques applied to character DOFs.
+
+### Core Methods
+
+#### reset()
+
+Resets specified environments to initial state.
+
+```python
+obs, info = env.reset(env_ids=None)
+```
+
+**Parameters:**
+- `env_ids` (torch.Tensor, optional): Environment indices to reset. If None, resets all.
+
+**Returns:**
+- `obs` (torch.Tensor): Observations `[num_envs, obs_dim]`
+- `info` (dict): Additional information
+
+**Source:** `ig_parkour_env.py:809-829`
+
+#### step()
+
+Executes one simulation step with actions.
+
+```python
+next_obs, reward, done, info = env.step(action)
+```
+
+**Parameters:**
+- `action` (torch.Tensor): Actions `[num_envs, action_dim]`
+
+**Returns:**
+- `next_obs` (torch.Tensor): Next observations
+- `reward` (torch.Tensor): Rewards `[num_envs]`
+- `done` (torch.Tensor): Done flags `[num_envs]`
+- `info` (dict): Additional information including:
+  - `rewards`: Detailed reward components
+  - `timestep`: Current timestep per environment
+  - `char_contact_forces`: Contact forces on character
+
+**Source:** `ig_parkour_env.py:831-840`
+
+### Reward Structure
+
+Reward computation based on multiple components:
+
+```python
+# Weighted reward components (ig_parkour_env.py:984-1044)
+reward = (
+    pose_w * pose_reward +          # Pose similarity
+    vel_w * velocity_reward +       # Velocity matching
+    root_pos_w * root_pos_reward +  # Root position tracking
+    root_vel_w * root_vel_reward +  # Root velocity tracking
+    key_pos_w * key_pos_reward      # End effector tracking
+)
+
+# Optional contact penalty
+if use_contact_info:
+    reward += contact_penalty
+```
+
+**Reward Components:**
+- `pose_r`: Joint rotation similarity to reference
+- `vel_r`: Joint velocity similarity
+- `root_pos_r`: Root position tracking error
+- `root_vel_r`: Root velocity tracking error
+- `key_pos_r`: Key body position tracking error
+- `contact_penalty`: Contact timing mismatch penalty
+
+**Source:** `ig_parkour_env.py:984-1044`
+
+### Termination Conditions
+
+Episode termination occurs when:
+
+1. **Height termination**: Root height below threshold
+2. **Pose termination**: Pose deviation exceeds limit (if enabled)
+3. **Root position termination**: Root position error too large
+4. **Root rotation termination**: Root rotation error too large
+5. **Time limit**: Episode length exceeded
+6. **Motion completion**: Reference motion finished
+
+```python
+# Configuration (ig_parkour_env.py:62-88)
+env_config = {
+    "enable_early_termination": True,
+    "termination_height": 0.3,
+    "pose_termination": True,
+    "pose_termination_dist": 0.5,
+    "root_pos_termination_dist": 3.0,
+    "root_rot_termination_angle": 0.8
+}
+```
+
+**Source:** `ig_parkour_env.py:967-982`
+
+---
+
+## DeepMimicEnv
+
+DeepMimic-style motion tracking environment with motion library.
+
+### Initialization
+
+```python
+from parc.motion_tracker.envs.ig_parkour.dm_env import DeepMimicEnv
+
+dm_env = DeepMimicEnv(
+    config=config,
+    num_envs=1024,
+    device="cuda:0",
+    visualize=False,
+    char_model=kinematic_model
+)
+```
+
+**Parameters:**
+- `config` (dict): Configuration with DeepMimic settings
+- `num_envs` (int): Number of parallel environments
+- `device` (str): PyTorch device
+- `visualize` (bool): Enable visualization
+- `char_model`: Kinematic character model
+
+**Source:** `dm_env.py:19-93`
+
+### Motion Library
+
+```python
+# Motion library manages reference motions
+dm_env._mlib.num_motions()           # Total number of motions
+dm_env._mlib.sample_motions(n)       # Sample n motion IDs
+dm_env._mlib.get_motion_length(ids)  # Get motion durations
+```
+
+**Motion sampling with failure rates:**
+
+```python
+# Motions with higher failure rates get more samples
+weights_modifier = torch.clamp(
+    dm_env._motion_id_fail_rates,
+    min=min_motion_weight
+)
+motion_weights = weights_modifier * dm_env._mlib._motion_weights
+motion_ids = dm_env._mlib.sample_motions(n, motion_weights)
+```
+
+**Source:** `dm_env.py:473-521`
+
+### Terrain Management
+
+#### build_terrain()
+
+Builds procedural terrain for motions.
+
+```python
+verts, tris = dm_env.build_terrain(
+    env_config=config["env"],
+    terrain_save_path="terrain.pkl",
+    x_offset=0.0,
+    y_offset=0.0
+)
+```
+
+**Terrain build modes:**
+- `"square"`: Grid layout of terrains
+- `"wide"`: Linear arrangement
+- `"file"`: Load from motion files
+
+**Source:** `dm_env.py:95-316`
+
+#### load_terrain()
+
+Loads pre-built terrain from file.
+
+```python
+verts, tris = dm_env.load_terrain(terrain_save_path)
+```
+
+**Source:** `dm_env.py:447-463`
+
+### Reference Motion Updates
+
+#### _update_ref_motion()
+
+Updates reference motion state for current timestep.
+
+```python
+dm_env._update_ref_motion()
+
+# Access reference state
+root_pos = dm_env._ref_root_pos      # [num_envs, 3]
+root_rot = dm_env._ref_root_rot      # [num_envs, 4]
+joint_rot = dm_env._ref_joint_rot    # [num_envs, num_joints-1, 3]
+contacts = dm_env._ref_contacts      # [num_envs, num_contact_bodies]
+```
+
+**Source:** `dm_env.py:523-545`
+
+#### compute_tar_obs()
+
+Computes target observations for future timesteps.
+
+```python
+tar_root_pos, tar_root_rot, tar_joint_rot, tar_key_pos, tar_contacts = \
+    dm_env.compute_tar_obs(
+        tar_obs_steps=torch.tensor([1, 2, 3]),
+        env_ids=None
+    )
+
+# Returns:
+# tar_root_pos: [num_envs, num_steps, 3]
+# tar_root_rot: [num_envs, num_steps, 4]
+# tar_joint_rot: [num_envs, num_steps, num_joints-1, 3]
+# tar_key_pos: [num_envs, num_steps, num_key_bodies, 3]
+# tar_contacts: [num_envs, num_steps, num_contact_bodies]
+```
+
+**Source:** `dm_env.py:594-626`
+
+### Failure Rate Tracking
+
+```python
+# Exponential moving average of failure rates per motion
+dm_env._motion_id_fail_rates  # [num_motions]
+dm_env._ema_weight = 0.01     # EMA update weight
+
+# Updated on episode termination (dm_env.py:650-661)
+if done_flag == FAIL:
+    fail_rate[motion_id] = fail_rate[motion_id] * (1 - ema) + ema
+elif done_flag == SUCC or TIME:
+    fail_rate[motion_id] = fail_rate[motion_id] * (1 - ema)
+```
+
+**Source:** `dm_env.py:628-665`
+
+### Utility Methods
+
+```python
+# Get motion information for specific environment
+motion_name = dm_env.get_env_motion_name(env_id)
+motion_length = dm_env.get_env_motion_length(env_id)
+motion_time = dm_env.get_env_motion_time(env_id)
+
+# Demo mode and motion control
+dm_env.set_demo_mode(val=True)
+dm_env.set_motion_start_time_fraction(fraction_tensor)
+
+# Logging
+extra_info = dm_env.get_extra_log_info()
+# Returns failure rates and statistics
+```
+
+**Source:** `dm_env.py:737-758`
+
+---
+
+## Configuration Example
+
+```yaml
+env:
+  # Basic settings
+  num_envs: 4096
+  episode_length: 10.0
+  timestep: 0.0166  # 60 Hz
+  
+  # Termination
+  enable_early_termination: true
+  termination_height: 0.3
+  pose_termination: true
+  pose_termination_dist: 0.5
+  
+  # Observations
+  enable_tar_obs: true
+  tar_obs_steps: [1, 2, 3]
+  use_contact_info: true
+  global_root_height_obs: true
+  
+  # Rewards
+  pose_w: 0.5
+  vel_w: 0.05
+  root_pos_w: 0.15
+  root_vel_w: 0.1
+  key_pos_w: 0.2
+  
+  # DeepMimic settings
+  fraction_dm_envs: 1.0
+  dm:
+    motion_file: "motions/motion_lib.yaml"
+    terrains_per_motion: 1
+    terrain_build_mode: "square"
+    fail_rate_quantiles: [0.25, 0.5, 0.75]
+    heightmap:
+      horizontal_scale: 0.05
+      padding: 1.0
+```

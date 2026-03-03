@@ -1,0 +1,309 @@
+---
+title: Motion Synthesis
+description: Generate new motions using the trained MDM and procedural terrain generation
+---
+
+The motion synthesis stage generates diverse terrain-traversal motions using your trained motion diffusion model. This involves procedural terrain generation, path planning, kinematic motion generation, and optimization.
+
+## Overview
+
+The synthesis pipeline:
+1. **Generate terrain** - Create procedural terrains (boxes, paths, stairs, or from files)
+2. **Plan path** - Use A* pathfinding on the terrain
+3. **Generate motions** - Use MDM to create candidate motions along the path
+4. **Filter candidates** - Apply kinematic heuristics (contact/penetration loss)
+5. **Optimize** - Refine motions with kinematic optimization
+6. **Create variants** - Save both original and mirrored versions
+
+## Quick Start
+
+<Steps>
+  <Step title="Prepare configuration">
+    Create or modify a config file:
+    ```bash
+    python scripts/parc_2_kin_gen.py --config data/configs/parc_2_kin_gen_default.yaml
+    ```
+  </Step>
+
+  <Step title="Run motion generation">
+    ```bash
+    python scripts/parc_2_kin_gen.py --config path/to/config.yaml
+    ```
+    
+    The script generates multiple motion variants for each terrain.
+  </Step>
+
+  <Step title="Check outputs">
+    Generated motions are saved as `.pkl` files in the output directory:
+    ```
+    output_dir/
+    ├── BOXES_0_0_opt.pkl
+    ├── BOXES_0_1_opt.pkl
+    ├── flipped/
+    │   ├── BOXES_0_0_opt_flipped.pkl
+    │   └── ...
+    └── log/
+        └── log_BOXES_0_0.txt
+    ```
+  </Step>
+</Steps>
+
+## Configuration Guide
+
+### Core Settings
+
+```yaml
+mdm_model_path: "path/to/model.ckpt"  # Trained MDM checkpoint
+output_dir: "output/kin_gen/"         # Output directory
+motion_id_offset: 0                   # Starting motion ID
+num_new_motions: 100                  # Number of motions to generate
+save_name: "BOXES"                    # Base name for motions
+```
+
+### Terrain Settings
+
+```yaml
+new_terrain_dim_x: 16    # Terrain grid size X
+new_terrain_dim_y: 16    # Terrain grid size Y  
+dx: 0.4                  # Grid cell size X (meters)
+dy: 0.4                  # Grid cell size Y (meters)
+simplify_terrain: True   # Apply terrain simplification
+```
+
+### Procedural Generation Modes
+
+#### Mode: BOXES
+
+Generates random box obstacles:
+
+```yaml
+procgen_mode: "BOXES"
+
+boxes:
+  num_boxes: 10
+  min_box_h: -2.0        # Minimum box height
+  max_box_h: 2.0         # Maximum box height
+  box_max_len: 10        # Maximum box length
+  box_min_len: 5         # Minimum box length
+  max_box_angle: 0.0     # Maximum rotation angle
+  min_box_angle: 0.0     # Minimum rotation angle
+```
+
+#### Mode: PATHS
+
+Generates path-based terrains:
+
+```yaml
+procgen_mode: "PATHS"
+
+paths:
+  num_terrain_paths: 8
+  maxpool_size: 1
+  path_min_height: -1.6
+  path_max_height: 2.0
+  floor_height: -2.0
+```
+
+#### Mode: STAIRS
+
+Generates staircase terrains:
+
+```yaml
+procgen_mode: "STAIRS"
+
+stairs:
+  min_stair_start_height: -3.0
+  max_stair_start_height: 1.0
+  min_step_height: 0.15
+  max_step_height: 0.25
+  num_stairs: 4
+  min_stair_thickness: 2.0
+  max_stair_thickness: 8.0
+```
+
+#### Mode: FILE
+
+Use pre-made terrain files:
+
+```yaml
+procgen_mode: "FILE"
+input_terrain_path: "path/to/terrain.pkl"  # Single .pkl or .yaml with list
+```
+
+### A* Path Planning
+
+Configure the pathfinding algorithm:
+
+```yaml
+astar:
+  max_z_diff: 2.1              # Max height difference for traversal
+  max_jump_xy_dist: 3.0        # Max horizontal jump distance
+  max_jump_z_diff: 0.5         # Max upward jump height
+  min_jump_z_diff: -1.0        # Max downward jump height
+  w_z: 0.15                    # Height cost weight
+  w_xy: 1.0                    # Distance cost weight
+  w_bumpy: 0.0                 # Bumpiness cost weight
+  max_bumpy: 0.2               # Maximum bumpiness
+  uniform_cost_max: 0.5        # Random cost max
+  uniform_cost_min: 0.0        # Random cost min
+  min_start_end_xy_dist: 5.0   # Minimum path distance
+  max_cost: 1000.0             # Maximum path cost
+```
+
+### MDM Motion Generation
+
+Configure how the MDM generates motions:
+
+```yaml
+mdm_path:
+  next_node_lookahead: 7       # Nodes to look ahead
+  rewind_num_frames: 5         # Frames to rewind for overlap
+  end_of_path_buffer: 2        # Buffer at path end
+  max_motion_length: 10.0      # Max motion duration (seconds)
+  mdm_batch_size: 128          # Generate N candidates
+  top_k: 2                     # Keep top K candidates
+  w_target: 2.0                # Target direction loss weight
+  w_contact: 0.1               # Contact loss weight
+  w_pen: 0.1                   # Penetration loss weight
+
+mdm_gen:
+  use_prev_state: True         # Use autoregressive generation
+  use_cfg: True                # Use classifier-free guidance
+  cfg_scale: 0.65              # CFG scale
+  use_ddim: True               # Use DDIM sampling
+  ddim_stride: 5               # DDIM stride
+  target_condition_key: True   # Condition on target
+  prev_state_ind_key: True     # Use previous state indicator
+```
+
+### Motion Quality Filtering
+
+Set thresholds for accepting generated motions:
+
+```yaml
+max_contact_loss: 3.0     # Max acceptable contact loss
+max_pen_loss: 8.0         # Max acceptable penetration loss  
+max_total_loss: 30.0      # Max acceptable total loss
+```
+
+### Kinematic Optimization
+
+Refine motions with optimization:
+
+```yaml
+use_opt: True                # Enable optimization
+remove_hesitation: True      # Remove hesitation frames
+
+opt:
+  device: "cuda:0"
+  output_dir: "output/opt/"
+  char_model: "data/assets/humanoid.xml"
+  use_wandb: True
+  num_iters: 3000            # Optimization iterations
+  step_size: 0.001           # Gradient step size
+  
+  # Loss weights
+  w_root_pos: 1.0
+  w_root_rot: 10.0
+  w_joint_rot: 1.0
+  w_smoothness: 10.0
+  w_penetration: 1000.0      # High to prevent interpenetration
+  w_contact: 1000.0          # High to enforce contacts
+  w_sliding: 10.0
+  w_body_constraints: 1000.0 # Enforce body constraints
+  w_jerk: 1000.0             # Penalize jerk (smoothness)
+  max_jerk: 1000.0
+  
+  auto_compute_body_constraints: True  # Auto compute from motion
+  
+  # Character point sampling for collision detection
+  char_point_samples:
+    sphere_num_subdivisions: 0
+    box_num_slices: 2
+    box_dim_x: 3
+    box_dim_y: 6
+    capsule_num_circle_points: 4
+    capsule_num_sphere_subdivisions: 0
+    capsule_num_cylinder_slices: 4
+```
+
+## Generation Modes
+
+### Terrain-Only Generation
+
+To only generate terrains without motions:
+
+```yaml
+only_gen: True
+```
+
+This creates `.pkl` files with terrain and path data only, useful for testing terrain generation.
+
+### Full Generation
+
+```yaml
+only_gen: False
+```
+
+Generates complete motions with terrain, optimizes them, and creates mirrored variants.
+
+## Important Files
+
+See the implementation in:
+- `scripts/parc_2_kin_gen.py` - Main generation script
+- `parc/motion_synthesis/procgen/astar.py` - A* pathfinding
+- `parc/motion_synthesis/procgen/mdm_path.py` - Autoregressive motion generation
+- `parc/motion_synthesis/motion_opt/motion_optimization.py` - Kinematic optimization
+- `parc/util/terrain_util.py` - Terrain generation utilities
+
+## Output Format
+
+Each `.pkl` file contains:
+- **motion_frames**: Root positions, rotations, joint rotations, contacts
+- **terrain**: Heightfield data
+- **path_nodes**: Path waypoints
+- **hf_mask_inds**: Terrain contact indices
+- **body_constraints**: Body constraint data (if computed)
+- **fps**: Frame rate
+- **loop_mode**: CLAMP or WRAP
+
+## Troubleshooting
+
+### No Valid Motions Generated
+
+**Symptoms**: Script keeps retrying, finds 0 valid motions
+
+**Solutions**:
+- Increase `max_contact_loss`, `max_pen_loss`, `max_total_loss`
+- Adjust A* settings (reduce `max_z_diff`, increase `max_jump_xy_dist`)
+- Increase `mdm_batch_size` to generate more candidates
+- Check if MDM model is properly trained
+
+### A* Cannot Find Path
+
+**Symptoms**: "something wrong with procgen" error
+
+**Solutions**:
+- Reduce `min_start_end_xy_dist` in astar config
+- Simplify terrain (set `simplify_terrain: True`)
+- Adjust `max_z_diff` and jump parameters
+- For FILE mode, ensure terrain has traversable regions
+
+### Optimization Takes Too Long
+
+**Solutions**:
+- Reduce `num_iters` (try 1000 instead of 3000)
+- Reduce `mdm_batch_size` (fewer candidates to optimize)
+- Reduce `top_k` to 1
+
+### Motions Look Unnatural
+
+**Solutions**:
+- Increase `w_smoothness` in opt config
+- Enable `remove_hesitation: True`
+- Adjust `w_jerk` to penalize abrupt changes
+- Lower `cfg_scale` in mdm_gen (0.5 instead of 0.65)
+
+## Next Steps
+
+After generating motions, proceed to [training the motion tracking controller](/guides/motion-tracking-controller).

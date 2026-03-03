@@ -1,0 +1,841 @@
+---
+title: KinCharModel
+description: Kinematic character model for forward kinematics and joint management
+---
+
+## Overview
+
+The `KinCharModel` class represents a kinematic character model with hierarchical joint structure. It provides functionality for loading character definitions from XML files, performing forward kinematics, converting between rotation representations, and managing joint constraints.
+
+## Enums
+
+### JointType
+
+Defines the types of joints supported by the character model.
+
+```python
+class JointType(enum.Enum):
+    ROOT = 0       # Root joint (no DOF)
+    HINGE = 1      # 1-DOF revolute joint
+    SPHERICAL = 2  # 3-DOF ball joint
+    FIXED = 3      # Fixed joint (no DOF)
+```
+
+### GeomType
+
+Defines the types of geometric shapes for collision and visualization.
+
+```python
+class GeomType(enum.Enum):
+    BOX = 0
+    SPHERE = 1
+    CAPSULE = 2
+    CYLINDER = 3
+    MESH = 4
+```
+
+## Classes
+
+### Joint
+
+Represents a single joint in the character.
+
+```python
+Joint(name: str, joint_type: JointType, axis: torch.Tensor, limits=None)
+```
+
+<ParamField path="name" type="str" required>
+  Name of the joint.
+</ParamField>
+
+<ParamField path="joint_type" type="JointType" required>
+  Type of joint (ROOT, HINGE, SPHERICAL, or FIXED).
+</ParamField>
+
+<ParamField path="axis" type="torch.Tensor">
+  Axis of rotation for HINGE joints (None for other types).
+</ParamField>
+
+<ParamField path="limits" type="torch.Tensor" default="None">
+  Joint limits in radians.
+</ParamField>
+
+#### Methods
+
+##### get_dof_dim
+
+Get the number of degrees of freedom for this joint.
+
+```python
+get_dof_dim() -> int
+```
+
+<ResponseField name="return" type="int">
+  Number of DOFs (0 for ROOT/FIXED, 1 for HINGE, 3 for SPHERICAL).
+</ResponseField>
+
+##### dof_to_rot
+
+Convert DOF values to quaternion rotation.
+
+```python
+dof_to_rot(dof: torch.Tensor) -> torch.Tensor
+```
+
+##### rot_to_dof
+
+Convert quaternion rotation to DOF values.
+
+```python
+rot_to_dof(rot: torch.Tensor) -> torch.Tensor
+```
+
+### Geom
+
+Represents a geometric shape attached to a body.
+
+```python
+Geom(
+    shape_type: GeomType,
+    offset: torch.Tensor | list,
+    dims: torch.Tensor | list,
+    device,
+    quat=None,
+    radius=None,
+    mesh_name=None,
+    name=None
+)
+```
+
+### KinCharModel
+
+Main class for kinematic character modeling.
+
+## Initialization
+
+### Constructor
+
+```python
+KinCharModel(device)
+```
+
+<ParamField path="device" type="str | torch.device" required>
+  Device (CPU or GPU) for storing character data.
+</ParamField>
+
+### init
+
+Initialize the character model with body hierarchy.
+
+```python
+init(
+    body_names: list[str],
+    parent_indices: list[int] | torch.Tensor,
+    local_translation: list | torch.Tensor,
+    local_rotation: list | torch.Tensor,
+    joints: list[Joint],
+    geoms: list[list[Geom]] = None,
+    contact_body_names: list[str] = None
+)
+```
+
+<ParamField path="body_names" type="list[str]" required>
+  Names of all bodies in the character.
+</ParamField>
+
+<ParamField path="parent_indices" type="list[int] | torch.Tensor" required>
+  Parent index for each body (-1 for root).
+</ParamField>
+
+<ParamField path="local_translation" type="list | torch.Tensor" required>
+  Local translation of each body relative to parent (shape: [num_bodies, 3]).
+</ParamField>
+
+<ParamField path="local_rotation" type="list | torch.Tensor" required>
+  Local rotation of each body as quaternions (shape: [num_bodies, 4]).
+</ParamField>
+
+<ParamField path="joints" type="list[Joint]" required>
+  Joint definitions for each body.
+</ParamField>
+
+<ParamField path="geoms" type="list[list[Geom]]" default="None">
+  Geometric shapes for each body (for collision/visualization).
+</ParamField>
+
+<ParamField path="contact_body_names" type="list[str]" default="None">
+  Names of bodies that can make contact. If None, all bodies are contact bodies.
+</ParamField>
+
+### load_char_file
+
+Load character definition from a MuJoCo XML file.
+
+```python
+load_char_file(char_file: str)
+```
+
+<ParamField path="char_file" type="str" required>
+  Path to the MuJoCo XML character definition file.
+</ParamField>
+
+## Core Methods
+
+### forward_kinematics
+
+Compute world-space positions and rotations for all bodies.
+
+```python
+forward_kinematics(
+    root_pos: torch.Tensor,
+    root_rot: torch.Tensor,
+    joint_rot: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]
+```
+
+<ParamField path="root_pos" type="torch.Tensor" required>
+  Root body position (shape: [..., 3]).
+</ParamField>
+
+<ParamField path="root_rot" type="torch.Tensor" required>
+  Root body rotation as quaternion (shape: [..., 4]).
+</ParamField>
+
+<ParamField path="joint_rot" type="torch.Tensor" required>
+  Joint rotations as quaternions (shape: [..., num_joints-1, 4]).
+</ParamField>
+
+<ResponseField name="return" type="tuple[torch.Tensor, torch.Tensor]">
+  Tuple containing:
+  - `body_pos` (torch.Tensor): World positions of all bodies (shape: [..., num_bodies, 3])
+  - `body_rot` (torch.Tensor): World rotations of all bodies (shape: [..., num_bodies, 4])
+</ResponseField>
+
+### dof_to_rot
+
+Convert DOF values to joint rotations.
+
+```python
+dof_to_rot(dof: torch.Tensor) -> torch.Tensor
+```
+
+<ParamField path="dof" type="torch.Tensor" required>
+  DOF values (shape: [..., dof_size]).
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  Joint rotations as quaternions (shape: [..., num_joints-1, 4]).
+</ResponseField>
+
+### rot_to_dof
+
+Convert joint rotations to DOF values.
+
+```python
+rot_to_dof(rot: torch.Tensor) -> torch.Tensor
+```
+
+<ParamField path="rot" type="torch.Tensor" required>
+  Joint rotations as quaternions (shape: [..., num_joints-1, 4]).
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  DOF values (shape: [..., dof_size]).
+</ResponseField>
+
+### compute_dof_vel
+
+Compute DOF velocities from two consecutive joint rotation frames.
+
+```python
+compute_dof_vel(
+    joint_rot0: torch.Tensor,
+    joint_rot1: torch.Tensor,
+    dt: float
+) -> torch.Tensor
+```
+
+<ParamField path="joint_rot0" type="torch.Tensor" required>
+  Joint rotations at time t (shape: [..., num_joints-1, 4]).
+</ParamField>
+
+<ParamField path="joint_rot1" type="torch.Tensor" required>
+  Joint rotations at time t+dt (shape: [..., num_joints-1, 4]).
+</ParamField>
+
+<ParamField path="dt" type="float" required>
+  Time step between frames.
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  DOF velocities (shape: [..., dof_size]).
+</ResponseField>
+
+### compute_frame_dof_vel
+
+Compute DOF velocities for a sequence of motion frames.
+
+```python
+compute_frame_dof_vel(
+    joint_rot: torch.Tensor,
+    dt: float
+) -> torch.Tensor
+```
+
+<ParamField path="joint_rot" type="torch.Tensor" required>
+  Sequence of joint rotations (shape: [..., num_frames, num_joints-1, 4]).
+</ParamField>
+
+<ParamField path="dt" type="float" required>
+  Time step between frames.
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  DOF velocities for all frames (shape: [..., num_frames, dof_size]).
+</ResponseField>
+
+### apply_joint_dof_limits
+
+Clamp DOF values to joint limits.
+
+```python
+apply_joint_dof_limits(joint_dofs: torch.Tensor) -> torch.Tensor
+```
+
+<ParamField path="joint_dofs" type="torch.Tensor" required>
+  DOF values to clamp (shape: [..., dof_size]).
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  Clamped DOF values within joint limits.
+</ResponseField>
+
+### construct_frame_data
+
+Combine root and joint data into a single motion frame tensor.
+
+```python
+construct_frame_data(
+    root_pos: torch.Tensor,
+    root_rot_quat: torch.Tensor,
+    joint_rot: torch.Tensor
+) -> torch.Tensor
+```
+
+<ParamField path="root_pos" type="torch.Tensor" required>
+  Root positions.
+</ParamField>
+
+<ParamField path="root_rot_quat" type="torch.Tensor" required>
+  Root rotations as quaternions.
+</ParamField>
+
+<ParamField path="joint_rot" type="torch.Tensor" required>
+  Joint rotations as quaternions.
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  Combined motion frame with root_pos, root_rot (exp map), and joint_dof.
+</ResponseField>
+
+## Body and Joint Queries
+
+### get_num_bodies
+
+```python
+get_num_bodies() -> int
+```
+
+<ResponseField name="return" type="int">
+  Total number of bodies in the character.
+</ResponseField>
+
+### get_num_joints
+
+```python
+get_num_joints() -> int
+```
+
+<ResponseField name="return" type="int">
+  Total number of joints (including root).
+</ResponseField>
+
+### get_num_non_root_joints
+
+```python
+get_num_non_root_joints() -> int
+```
+
+<ResponseField name="return" type="int">
+  Number of non-root joints.
+</ResponseField>
+
+### get_dof_size
+
+```python
+get_dof_size() -> int
+```
+
+<ResponseField name="return" type="int">
+  Total number of degrees of freedom.
+</ResponseField>
+
+### get_body_names
+
+```python
+get_body_names() -> list[str]
+```
+
+<ResponseField name="return" type="list[str]">
+  List of all body names.
+</ResponseField>
+
+### get_body_name
+
+```python
+get_body_name(body_id: int) -> str
+```
+
+<ParamField path="body_id" type="int" required>
+  Body index.
+</ParamField>
+
+<ResponseField name="return" type="str">
+  Name of the body.
+</ResponseField>
+
+### get_body_id
+
+```python
+get_body_id(body_name: str) -> int
+```
+
+<ParamField path="body_name" type="str" required>
+  Name of the body.
+</ParamField>
+
+<ResponseField name="return" type="int">
+  Index of the body.
+</ResponseField>
+
+### get_joint_id
+
+```python
+get_joint_id(body_name: str) -> int
+```
+
+<ParamField path="body_name" type="str" required>
+  Name of the body.
+</ParamField>
+
+<ResponseField name="return" type="int">
+  Joint index (body index - 1, since joint arrays exclude root).
+</ResponseField>
+
+### get_joint
+
+```python
+get_joint(j: int) -> Joint
+```
+
+<ParamField path="j" type="int" required>
+  Joint index (must be > 0).
+</ParamField>
+
+<ResponseField name="return" type="Joint">
+  Joint object at the specified index.
+</ResponseField>
+
+### get_parent_id
+
+```python
+get_parent_id(j: int) -> int
+```
+
+<ParamField path="j" type="int" required>
+  Body/joint index.
+</ParamField>
+
+<ResponseField name="return" type="int">
+  Index of the parent body (-1 for root).
+</ResponseField>
+
+### get_joint_dof_idx
+
+```python
+get_joint_dof_idx(j: int) -> int
+```
+
+<ParamField path="j" type="int" required>
+  Joint index.
+</ParamField>
+
+<ResponseField name="return" type="int">
+  Starting index of this joint's DOFs in the DOF vector.
+</ResponseField>
+
+### get_joint_dof_dim
+
+```python
+get_joint_dof_dim(j: int) -> int
+```
+
+<ParamField path="j" type="int" required>
+  Joint index.
+</ParamField>
+
+<ResponseField name="return" type="int">
+  Number of DOFs for this joint.
+</ResponseField>
+
+## Contact Bodies
+
+### get_num_contact_bodies
+
+```python
+get_num_contact_bodies() -> int
+```
+
+<ResponseField name="return" type="int">
+  Number of bodies designated for contact detection.
+</ResponseField>
+
+### is_contact_body
+
+```python
+is_contact_body(body_name: str) -> bool
+```
+
+<ParamField path="body_name" type="str" required>
+  Name of the body.
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  True if the body is a contact body.
+</ResponseField>
+
+### get_contact_body_id
+
+```python
+get_contact_body_id(body_name: str) -> int
+```
+
+<ParamField path="body_name" type="str" required>
+  Name of the contact body.
+</ParamField>
+
+<ResponseField name="return" type="int">
+  Index within the contact body array.
+</ResponseField>
+
+### get_contact_body_ids
+
+```python
+get_contact_body_ids() -> torch.Tensor
+```
+
+<ResponseField name="return" type="torch.Tensor">
+  Tensor of contact body indices.
+</ResponseField>
+
+### get_contact_body_name
+
+```python
+get_contact_body_name(body_id: int) -> str
+```
+
+<ParamField path="body_id" type="int" required>
+  Contact body index.
+</ParamField>
+
+<ResponseField name="return" type="str">
+  Name of the contact body.
+</ResponseField>
+
+### create_full_contact_tensor
+
+Expand a contact tensor from contact bodies to all bodies.
+
+```python
+create_full_contact_tensor(contact_tensor: torch.Tensor) -> torch.Tensor
+```
+
+<ParamField path="contact_tensor" type="torch.Tensor" required>
+  Contact labels for contact bodies (shape: [..., num_contact_bodies]).
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  Contact labels for all bodies (shape: [..., num_bodies]). Non-contact bodies have label 0.
+</ResponseField>
+
+## Geometry Methods
+
+### get_geoms
+
+```python
+get_geoms(body_id: int) -> list[Geom]
+```
+
+<ParamField path="body_id" type="int" required>
+  Body index.
+</ParamField>
+
+<ResponseField name="return" type="list[Geom]">
+  List of geometric shapes attached to the body.
+</ResponseField>
+
+### get_body_geom_names
+
+```python
+get_body_geom_names() -> list[str]
+```
+
+<ResponseField name="return" type="list[str]">
+  List of all geometry names in the character.
+</ResponseField>
+
+### find_lowest_point
+
+Find the lowest point on the character given body poses.
+
+```python
+find_lowest_point(
+    body_pos: torch.Tensor,
+    body_rot: torch.Tensor
+) -> torch.Tensor
+```
+
+<ParamField path="body_pos" type="torch.Tensor" required>
+  World positions of all bodies (shape: [..., num_bodies, 3]).
+</ParamField>
+
+<ParamField path="body_rot" type="torch.Tensor" required>
+  World rotations of all bodies (shape: [..., num_bodies, 4]).
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  3D position of the lowest point (shape: [..., 3]).
+</ResponseField>
+
+## Bone Length Methods
+
+### get_bone_length
+
+Get the length of a bone (distance from parent joint).
+
+```python
+get_bone_length(body: int | str) -> float
+```
+
+<ParamField path="body" type="int | str" required>
+  Body index or name.
+</ParamField>
+
+<ResponseField name="return" type="float">
+  Length of the bone in meters.
+</ResponseField>
+
+### set_bone_length
+
+Set the length of a bone.
+
+```python
+set_bone_length(
+    body: int | str,
+    new_length: float,
+    update_original: bool = True,
+    update_geoms: bool = True
+)
+```
+
+<ParamField path="body" type="int | str" required>
+  Body index or name.
+</ParamField>
+
+<ParamField path="new_length" type="float" required>
+  New bone length in meters.
+</ParamField>
+
+<ParamField path="update_original" type="bool" default="True">
+  Whether to update the stored original length.
+</ParamField>
+
+<ParamField path="update_geoms" type="bool" default="True">
+  Whether to scale attached geometries.
+</ParamField>
+
+### scale_bone_length
+
+Scale the length of a bone by a multiplicative factor.
+
+```python
+scale_bone_length(
+    body: int | str,
+    scale: float,
+    update_original: bool = True,
+    update_geoms: bool = True
+)
+```
+
+<ParamField path="body" type="int | str" required>
+  Body index or name.
+</ParamField>
+
+<ParamField path="scale" type="float" required>
+  Multiplicative scale factor.
+</ParamField>
+
+<ParamField path="update_original" type="bool" default="True">
+  Whether to update the stored original length.
+</ParamField>
+
+<ParamField path="update_geoms" type="bool" default="True">
+  Whether to scale attached geometries.
+</ParamField>
+
+## Utility Methods
+
+### get_copy
+
+Create a deep copy of the character model.
+
+```python
+get_copy(new_device=None) -> KinCharModel
+```
+
+<ParamField path="new_device" type="str | torch.device" default="None">
+  Device for the copy. If None, uses the same device.
+</ParamField>
+
+<ResponseField name="return" type="KinCharModel">
+  Deep copy of the character model.
+</ResponseField>
+
+### output_xml
+
+Export the character to a MuJoCo XML file.
+
+```python
+output_xml(output_file: str)
+```
+
+<ParamField path="output_file" type="str" required>
+  Path where the XML file should be written.
+</ParamField>
+
+## Usage Examples
+
+### Loading a Character
+
+```python
+import torch
+from parc.anim.kin_char_model import KinCharModel
+
+# Create and load character model
+char_model = KinCharModel(device="cuda:0")
+char_model.load_char_file("path/to/character.xml")
+
+# Query character properties
+print(f"Number of bodies: {char_model.get_num_bodies()}")
+print(f"Number of joints: {char_model.get_num_joints()}")
+print(f"DOF size: {char_model.get_dof_size()}")
+print(f"Body names: {char_model.get_body_names()}")
+```
+
+### Forward Kinematics
+
+```python
+import torch
+
+# Define root pose and joint rotations
+batch_size = 10
+num_joints = char_model.get_num_joints() - 1
+
+root_pos = torch.zeros(batch_size, 3, device="cuda:0")
+root_pos[:, 2] = 1.0  # 1 meter above ground
+
+root_rot = torch.tensor([0, 0, 0, 1], device="cuda:0").expand(batch_size, 4)
+joint_rot = torch.zeros(batch_size, num_joints, 4, device="cuda:0")
+joint_rot[..., 3] = 1.0  # Identity quaternions
+
+# Compute forward kinematics
+body_pos, body_rot = char_model.forward_kinematics(root_pos, root_rot, joint_rot)
+
+print(f"Body positions shape: {body_pos.shape}")  # [10, num_bodies, 3]
+print(f"Body rotations shape: {body_rot.shape}")  # [10, num_bodies, 4]
+```
+
+### DOF Conversion
+
+```python
+# Convert joint rotations to DOF values
+dof_values = char_model.rot_to_dof(joint_rot)
+print(f"DOF shape: {dof_values.shape}")  # [10, dof_size]
+
+# Apply joint limits
+clamped_dofs = char_model.apply_joint_dof_limits(dof_values)
+
+# Convert back to rotations
+joint_rot_new = char_model.dof_to_rot(clamped_dofs)
+```
+
+### Working with Contact Bodies
+
+```python
+# Get contact body information
+num_contact = char_model.get_num_contact_bodies()
+contact_ids = char_model.get_contact_body_ids()
+
+print(f"Number of contact bodies: {num_contact}")
+for i in range(num_contact):
+    name = char_model.get_contact_body_name(i)
+    print(f"Contact body {i}: {name}")
+
+# Expand contact tensor to all bodies
+contact_labels = torch.randn(batch_size, num_contact, device="cuda:0")
+full_contacts = char_model.create_full_contact_tensor(contact_labels)
+print(f"Full contact tensor shape: {full_contacts.shape}")  # [10, num_bodies]
+```
+
+### Modifying Bone Lengths
+
+```python
+# Get current bone length
+body_name = "left_shin"
+original_length = char_model.get_bone_length(body_name)
+print(f"Original length: {original_length:.3f}m")
+
+# Scale the bone
+char_model.scale_bone_length(body_name, scale=1.2)
+new_length = char_model.get_bone_length(body_name)
+print(f"New length: {new_length:.3f}m")
+
+# Or set absolute length
+char_model.set_bone_length(body_name, new_length=0.5)
+```
+
+### Computing Velocities
+
+```python
+# Create two consecutive frames
+num_frames = 100
+joint_rot_sequence = torch.randn(num_frames, num_joints, 4, device="cuda:0")
+joint_rot_sequence = joint_rot_sequence / joint_rot_sequence.norm(dim=-1, keepdim=True)
+
+# Compute velocities for entire sequence
+dt = 1.0 / 30.0  # 30 FPS
+dof_vel = char_model.compute_frame_dof_vel(joint_rot_sequence, dt)
+print(f"DOF velocities shape: {dof_vel.shape}")  # [100, dof_size]
+```
+
+### Finding Lowest Point
+
+```python
+# Get body poses from forward kinematics
+body_pos, body_rot = char_model.forward_kinematics(root_pos, root_rot, joint_rot)
+
+# Find the lowest point (useful for ground contact)
+lowest_point = char_model.find_lowest_point(body_pos, body_rot)
+print(f"Lowest point: {lowest_point}")
+print(f"Height above ground: {lowest_point[..., 2]}")
+```

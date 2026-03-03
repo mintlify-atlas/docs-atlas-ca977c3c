@@ -1,0 +1,539 @@
+---
+title: MotionLib
+description: Motion library for loading and sampling motion data
+---
+
+## Overview
+
+The `MotionLib` class provides functionality for loading, managing, and sampling motion data for character animation. It supports loading motions from files or from `MotionFrames` objects, and provides methods for sampling and interpolating motion frames.
+
+## Classes
+
+### LoopMode
+
+An enumeration that defines how motions should loop.
+
+```python
+class LoopMode(enum.Enum):
+    CLAMP = 0  # Clamp motion to end frame
+    WRAP = 1   # Wrap motion back to beginning
+```
+
+<ParamField path="CLAMP" type="int" default="0">
+  Clamp the motion time to the end of the motion. Motion stays at final frame after completion.
+</ParamField>
+
+<ParamField path="WRAP" type="int" default="1">
+  Wrap the motion time back to the beginning. Motion loops continuously.
+</ParamField>
+
+### MotionLib
+
+Main class for managing motion libraries.
+
+## Initialization
+
+### Constructor
+
+```python
+MotionLib(char_model: KinCharModel = None, device=None, contact_info=False)
+```
+
+<ParamField path="char_model" type="KinCharModel" required>
+  The kinematic character model associated with the motions.
+</ParamField>
+
+<ParamField path="device" type="str | torch.device" required>
+  The device (CPU or GPU) on which to store motion data.
+</ParamField>
+
+<ParamField path="contact_info" type="bool" default="False">
+  Whether to load and store contact information for each frame.
+</ParamField>
+
+### Class Methods
+
+#### from_file
+
+Load a motion library from a motion file.
+
+```python
+@classmethod
+MotionLib.from_file(
+    motion_file: str,
+    char_model: KinCharModel,
+    device,
+    contact_info=False
+)
+```
+
+<ParamField path="motion_file" type="str" required>
+  Path to the motion file (.yaml for config with multiple motions, or direct motion file).
+</ParamField>
+
+<ParamField path="char_model" type="KinCharModel" required>
+  The kinematic character model.
+</ParamField>
+
+<ParamField path="device" type="str | torch.device" required>
+  Device for storing motion data.
+</ParamField>
+
+<ParamField path="contact_info" type="bool" default="False">
+  Whether to load contact information.
+</ParamField>
+
+<ResponseField name="return" type="MotionLib">
+  A new MotionLib instance loaded from the file.
+</ResponseField>
+
+#### from_frames
+
+Create a motion library from MotionFrames.
+
+```python
+@classmethod
+MotionLib.from_frames(
+    frames: MotionFrames,
+    char_model: KinCharModel,
+    device,
+    loop_mode: LoopMode,
+    fps: float,
+    contact_info=False
+)
+```
+
+<ParamField path="frames" type="MotionFrames" required>
+  Motion frames containing root_pos, root_rot, and joint_rot tensors.
+</ParamField>
+
+<ParamField path="char_model" type="KinCharModel" required>
+  The kinematic character model.
+</ParamField>
+
+<ParamField path="device" type="str | torch.device" required>
+  Device for storing motion data.
+</ParamField>
+
+<ParamField path="loop_mode" type="LoopMode" required>
+  Loop mode for the motion (CLAMP or WRAP).
+</ParamField>
+
+<ParamField path="fps" type="float" required>
+  Frames per second of the motion.
+</ParamField>
+
+<ParamField path="contact_info" type="bool" default="False">
+  Whether to include contact information.
+</ParamField>
+
+<ResponseField name="return" type="MotionLib">
+  A new MotionLib instance created from the frames.
+</ResponseField>
+
+## Methods
+
+### num_motions
+
+Get the number of motions in the library.
+
+```python
+num_motions() -> int
+```
+
+<ResponseField name="return" type="int">
+  The number of motions stored in the library.
+</ResponseField>
+
+### get_total_length
+
+Get the total length of all motions combined.
+
+```python
+get_total_length() -> float
+```
+
+<ResponseField name="return" type="float">
+  Total duration of all motions in seconds.
+</ResponseField>
+
+### sample_motions
+
+Randomly sample motion IDs from the library.
+
+```python
+sample_motions(n: int, motion_weights=None) -> torch.Tensor
+```
+
+<ParamField path="n" type="int" required>
+  Number of motion IDs to sample.
+</ParamField>
+
+<ParamField path="motion_weights" type="torch.Tensor" default="None">
+  Optional weights for sampling. If None, uses default motion weights.
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  Tensor of shape (n,) containing sampled motion IDs.
+</ResponseField>
+
+### sample_time
+
+Sample random times within motions.
+
+```python
+sample_time(
+    motion_ids: torch.Tensor,
+    truncate_time: float = None
+) -> torch.Tensor
+```
+
+<ParamField path="motion_ids" type="torch.Tensor" required>
+  Tensor of motion IDs to sample times for.
+</ParamField>
+
+<ParamField path="truncate_time" type="float" default="None">
+  Optional time to truncate from the end of each motion.
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  Tensor of sampled times (in seconds) within each motion.
+</ResponseField>
+
+### calc_motion_frame
+
+Calculate interpolated motion frames at specific times.
+
+```python
+calc_motion_frame(
+    motion_ids: torch.Tensor,
+    motion_times: torch.Tensor
+) -> tuple
+```
+
+<ParamField path="motion_ids" type="torch.Tensor" required>
+  Tensor of motion IDs.
+</ParamField>
+
+<ParamField path="motion_times" type="torch.Tensor" required>
+  Tensor of times (in seconds) within each motion.
+</ParamField>
+
+<ResponseField name="return" type="tuple">
+  Tuple containing:
+  - `root_pos` (torch.Tensor): Root positions (shape: [..., 3])
+  - `root_rot` (torch.Tensor): Root rotations as quaternions (shape: [..., 4])
+  - `root_vel` (torch.Tensor): Root velocities (shape: [..., 3])
+  - `root_ang_vel` (torch.Tensor): Root angular velocities (shape: [..., 3])
+  - `joint_rot` (torch.Tensor): Joint rotations as quaternions (shape: [..., num_joints-1, 4])
+  - `dof_vel` (torch.Tensor): DOF velocities (shape: [..., dof_size])
+  - `contacts` (torch.Tensor, optional): Contact information if contact_info=True
+</ResponseField>
+
+### get_motion_length
+
+Get the length of specific motions.
+
+```python
+get_motion_length(motion_ids: torch.Tensor) -> torch.Tensor
+```
+
+<ParamField path="motion_ids" type="torch.Tensor" required>
+  Tensor of motion IDs.
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  Tensor of motion lengths in seconds.
+</ResponseField>
+
+### get_motion_num_frames
+
+Get the number of frames in specific motions.
+
+```python
+get_motion_num_frames(motion_ids: torch.Tensor) -> torch.Tensor
+```
+
+<ParamField path="motion_ids" type="torch.Tensor" required>
+  Tensor of motion IDs.
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  Tensor of frame counts.
+</ResponseField>
+
+### get_motion_loop_mode
+
+Get the loop mode values for specific motions.
+
+```python
+get_motion_loop_mode(motion_ids: torch.Tensor) -> torch.Tensor
+```
+
+<ParamField path="motion_ids" type="torch.Tensor" required>
+  Tensor of motion IDs.
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  Tensor of loop mode values (0 for CLAMP, 1 for WRAP).
+</ResponseField>
+
+### get_motion_loop_mode_enum
+
+Get the loop mode enum for a specific motion.
+
+```python
+get_motion_loop_mode_enum(motion_id: int) -> LoopMode
+```
+
+<ParamField path="motion_id" type="int" required>
+  Single motion ID.
+</ParamField>
+
+<ResponseField name="return" type="LoopMode">
+  LoopMode enum value (CLAMP or WRAP).
+</ResponseField>
+
+### get_motion_fps
+
+Get the frames per second of a specific motion.
+
+```python
+get_motion_fps(motion_id: int) -> float
+```
+
+<ParamField path="motion_id" type="int" required>
+  Single motion ID.
+</ParamField>
+
+<ResponseField name="return" type="float">
+  Frames per second of the motion.
+</ResponseField>
+
+### calc_motion_phase
+
+Calculate the phase (0.0 to 1.0) within a motion at given times.
+
+```python
+calc_motion_phase(
+    motion_ids: torch.Tensor,
+    times: torch.Tensor
+) -> torch.Tensor
+```
+
+<ParamField path="motion_ids" type="torch.Tensor" required>
+  Tensor of motion IDs.
+</ParamField>
+
+<ParamField path="times" type="torch.Tensor" required>
+  Tensor of times within motions.
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  Tensor of phase values between 0.0 and 1.0.
+</ResponseField>
+
+### get_motion_names
+
+Get the list of motion names.
+
+```python
+get_motion_names() -> list[str]
+```
+
+<ResponseField name="return" type="list[str]">
+  List of motion names loaded from files.
+</ResponseField>
+
+### get_frames_for_id
+
+Get all frames for a specific motion.
+
+```python
+get_frames_for_id(
+    id: int,
+    compute_fk: bool = False
+) -> MotionFrames
+```
+
+<ParamField path="id" type="int" required>
+  Motion ID to retrieve frames for.
+</ParamField>
+
+<ParamField path="compute_fk" type="bool" default="False">
+  Whether to compute forward kinematics for body positions and rotations.
+</ParamField>
+
+<ResponseField name="return" type="MotionFrames">
+  MotionFrames object containing the motion data.
+</ResponseField>
+
+### joint_rot_to_dof
+
+Convert joint rotations to DOF values.
+
+```python
+joint_rot_to_dof(joint_rot: torch.Tensor) -> torch.Tensor
+```
+
+<ParamField path="joint_rot" type="torch.Tensor" required>
+  Joint rotations as quaternions.
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  DOF values for the joints.
+</ResponseField>
+
+### clone
+
+Create a deep copy of the motion library on a different device.
+
+```python
+clone(device) -> MotionLib
+```
+
+<ParamField path="device" type="str | torch.device" required>
+  Target device for the cloned library.
+</ParamField>
+
+<ResponseField name="return" type="MotionLib">
+  Cloned MotionLib instance on the specified device.
+</ResponseField>
+
+## Usage Examples
+
+### Loading from File
+
+```python
+import torch
+from parc.anim.motion_lib import MotionLib
+from parc.anim.kin_char_model import KinCharModel
+
+# Create character model
+char_model = KinCharModel(device="cuda:0")
+char_model.load_char_file("path/to/character.xml")
+
+# Load motion library from file
+motion_lib = MotionLib.from_file(
+    motion_file="path/to/motions.yaml",
+    char_model=char_model,
+    device="cuda:0",
+    contact_info=True
+)
+
+print(f"Loaded {motion_lib.num_motions()} motions")
+print(f"Total duration: {motion_lib.get_total_length():.2f} seconds")
+```
+
+### Sampling Motions
+
+```python
+# Sample 10 random motions
+motion_ids = motion_lib.sample_motions(n=10)
+
+# Sample random times within those motions
+motion_times = motion_lib.sample_time(motion_ids)
+
+# Get the motion frames at those times
+frames = motion_lib.calc_motion_frame(motion_ids, motion_times)
+root_pos, root_rot, root_vel, root_ang_vel, joint_rot, dof_vel = frames[:6]
+
+print(f"Root positions shape: {root_pos.shape}")
+print(f"Joint rotations shape: {joint_rot.shape}")
+```
+
+### Creating from MotionFrames
+
+```python
+from parc.util.motion_util import MotionFrames
+from parc.anim.motion_lib import LoopMode
+
+# Create motion frames (example with random data)
+num_frames = 100
+num_joints = char_model.get_num_joints() - 1
+
+frames = MotionFrames(
+    root_pos=torch.randn(num_frames, 3),
+    root_rot=torch.randn(num_frames, 4),
+    joint_rot=torch.randn(num_frames, num_joints, 4)
+)
+
+# Create motion library from frames
+motion_lib = MotionLib.from_frames(
+    frames=frames,
+    char_model=char_model,
+    device="cuda:0",
+    loop_mode=LoopMode.WRAP,
+    fps=30.0
+)
+```
+
+### Working with Motion Metadata
+
+```python
+# Get motion information
+motion_id = 0
+fps = motion_lib.get_motion_fps(motion_id)
+length = motion_lib.get_motion_length(torch.tensor([motion_id]))
+loop_mode = motion_lib.get_motion_loop_mode_enum(motion_id)
+
+print(f"Motion {motion_id}:")
+print(f"  FPS: {fps}")
+print(f"  Length: {length.item():.2f}s")
+print(f"  Loop mode: {loop_mode.name}")
+
+# Get all motion names
+names = motion_lib.get_motion_names()
+for i, name in enumerate(names):
+    print(f"Motion {i}: {name}")
+```
+
+## Helper Functions
+
+### extract_pose_data
+
+Extract components from a motion frame.
+
+```python
+extract_pose_data(frame: torch.Tensor) -> tuple
+```
+
+<ParamField path="frame" type="torch.Tensor" required>
+  Motion frame tensor containing root position, root rotation (exp map), and joint DOFs.
+</ParamField>
+
+<ResponseField name="return" type="tuple">
+  Tuple containing:
+  - `root_pos` (torch.Tensor): Root position (first 3 elements)
+  - `root_rot` (torch.Tensor): Root rotation as exp map (elements 3-6)
+  - `joint_dof` (torch.Tensor): Joint DOFs (remaining elements)
+</ResponseField>
+
+### calc_phase
+
+Calculate motion phase based on time and loop mode.
+
+```python
+@torch.jit.script
+calc_phase(
+    times: torch.Tensor,
+    motion_len: torch.Tensor,
+    loop_mode: torch.Tensor
+) -> torch.Tensor
+```
+
+<ParamField path="times" type="torch.Tensor" required>
+  Times within motions.
+</ParamField>
+
+<ParamField path="motion_len" type="torch.Tensor" required>
+  Length of motions.
+</ParamField>
+
+<ParamField path="loop_mode" type="torch.Tensor" required>
+  Loop mode values (0 for CLAMP, 1 for WRAP).
+</ParamField>
+
+<ResponseField name="return" type="torch.Tensor">
+  Phase values between 0.0 and 1.0.
+</ResponseField>

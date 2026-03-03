@@ -1,0 +1,95 @@
+---
+title: Datasets
+description: Access PARC motion datasets and learn how to use them
+---
+
+## Available Datasets
+
+PARC provides comprehensive motion and terrain datasets for physics-based character animation research.
+
+<Card title="PARC Dataset on HuggingFace" icon="database" href="https://huggingface.co/datasets/mxucg/PARC">
+  Official PARC motion and terrain dataset repository with multiple experimental iterations
+</Card>
+
+### Dataset Contents
+
+The HuggingFace repository includes:
+
+- **December 2024 Release**: 4 iterations of PARC training data
+- **April 2025 Release**: 5 iterations of PARC training data
+- **Compact Model**: Small model (~30 MB) for efficient deployment
+
+## Motion Library Structure
+
+The motion data files are structured to work with PARC's motion library system:
+
+- Motion files are loaded via `anim/motion_lib.py` and `anim/kin_char_model.py`
+- Data includes:
+  - Root positions and rotations
+  - Joint rotations
+  - Body contact information
+  - Frame rate (FPS) data
+
+## Viewing Motion Data
+
+You can visualize the motion files using Motionscope:
+
+```bash
+python scripts/run_motionscope.py
+```
+
+Configure the motion file to view by editing the `motion_filepath` parameter in:
+```
+parc/motionscope/motionscope_config.yaml
+```
+
+## Downloading and Using the Data
+
+### Option 1: Full Installation
+
+Follow the [installation guide](/installation) to set up the complete PARC environment.
+
+### Option 2: Data Only (Standalone)
+
+If you only need to read the motion data without installing the entire repository, use the standalone script:
+
+```bash
+python scripts/read_motion_data.py
+```
+
+**Minimal Requirements**: Only numpy (and possibly PyTorch) needed to read the data.
+
+### Reading Motion Data Programmatically
+
+Here's how to access motion data in your own scripts:
+
+```python
+import parc.util.file_io as file_io
+
+MOTION_FILE = "data/motion_terrains/sfu.pkl"
+
+ms_file_data = file_io.load_ms_file(MOTION_FILE)
+
+# Access motion data components
+root_positions = ms_file_data.motion_data.root_pos
+root_rotations = ms_file_data.motion_data.root_rot
+joint_rotations = ms_file_data.motion_data.joint_rot
+body_contacts = ms_file_data.motion_data.body_contacts
+fps = ms_file_data.motion_data.fps
+```
+
+## Legacy Dataset
+
+<Note>
+The old release (v0.1) is available on OneDrive with password "PARC", but uses a file format only compatible with v0.1 of PARC. We recommend using the new HuggingFace dataset for all new projects.
+</Note>
+
+## Data Directory Configuration
+
+All configuration files reference data through a `$DATA_DIR` placeholder. Set this in `user_config.yaml` at the repository root:
+
+```yaml
+DATA_DIR: "/absolute/path/to/your/data"
+```
+
+The training and pipeline scripts will automatically replace `$DATA_DIR` with your configured path.

@@ -1,0 +1,607 @@
+---
+title: Procedural Generation
+description: API reference for A* path planning and MDM-based motion generation along paths
+---
+
+The procedural generation module provides path planning and motion synthesis capabilities for character navigation on complex terrain. It combines A* graph search for path planning with MDM (Motion Diffusion Model) for generating realistic motion along paths.
+
+## Overview
+
+Procedural motion generation involves two main components:
+
+1. **Path Planning (A*):** Constructs a navigation graph from terrain and finds optimal paths between start/goal positions
+2. **Motion Synthesis (MDM Path):** Generates character motion that follows the planned path using a motion diffusion model
+
+## A* Path Planning
+
+The A* module (`astar.py`) provides terrain-aware pathfinding with support for jumping, climbing, and navigating complex heightfields.
+
+### AStarSettings
+
+Configuration class for A* pathfinding parameters.
+
+```python
+class AStarSettings:
+    max_z_diff = 2.1              # Max height difference for walkable edges
+    max_jump_xy_dist = 3.0        # Max horizontal jump distance
+    max_jump_z_diff = 0.3         # Max upward jump height
+    min_jump_z_diff = -0.7        # Max downward jump height
+    w_z = 0.15                    # Weight for vertical movement cost
+    w_xy = 1.0                    # Weight for horizontal movement cost
+    w_bumpy = 1.0                 # Weight for terrain roughness penalty
+    max_bumpy = 0.2               # Max terrain roughness threshold
+    uniform_cost_max = 0.25       # Max uniform random cost (for diversity)
+    uniform_cost_min = 0.0        # Min uniform random cost
+    min_start_end_xy_dist = 4.0   # Minimum start-to-goal distance
+    max_cost = 1000.0             # Maximum acceptable path cost
+```
+
+### Navigation Graph Construction
+
+#### construct_navigation_graph
+
+Builds a directed graph from heightfield terrain where nodes are grid cells and edges represent traversable connections.
+
+```python
+def construct_navigation_graph(
+    terrain: terrain_util.SubTerrain,
+    max_z_diff: float = 2.1,
+    max_jump_xy_dist: float = 3.0,
+    max_jump_z_diff: float = 0.3,
+    min_jump_z_diff: float = -1.0
+) -> list
+```
+
+**Graph Construction Process:**
+
+1. **Node Creation:** Each heightfield cell becomes a TerrainNode
+2. **Adjacent Edges:** Connect 8-neighbor cells if height difference ≤ `max_z_diff`
+3. **Cliff Detection:** Identify cliff nodes (elevated above neighbors)
+4. **Jump Edges:** Connect cliff nodes within `max_jump_xy_dist` if vertical gap is within jump range
+5. **Obstacle Checking:** Remove jump edges blocked by intermediate walls
+
+**Parameters:**
+
+- `terrain` (SubTerrain): Heightfield terrain representation
+- `max_z_diff` (float): Maximum height difference for adjacent connections
+- `max_jump_xy_dist` (float): Maximum horizontal distance for jump connections
+- `max_jump_z_diff` (float): Maximum upward jump height
+- `min_jump_z_diff` (float): Maximum downward jump height (negative value)
+
+**Returns:**
+
+- `nodes` (list): 2D list of TerrainNode objects indexed by [x][y]
+
+**Example:**
+
+```python
+import parc.motion_synthesis.procgen.astar as astar
+
+# Build navigation graph with custom jump parameters
+nav_graph = astar.construct_navigation_graph(
+    terrain=terrain,
+    max_z_diff=2.5,
+    max_jump_xy_dist=4.0,
+    max_jump_z_diff=0.5,
+    min_jump_z_diff=-1.0
+)
+
+# Reuse graph for multiple path queries
+path1, cost1 = astar.a_star_search(terrain, start1, goal1, nav_graph=nav_graph)
+path2, cost2 = astar.a_star_search(terrain, start2, goal2, nav_graph=nav_graph)
+```
+
+### TerrainNode
+
+Represents a navigable location in the terrain graph.
+
+```python
+class TerrainNode:
+    def __init__(self, index: np.ndarray, pos: np.ndarray, is_border: bool):
+        self.index = index      # Grid indices [x, y]
+        self.pos = pos          # 3D world position [x, y, z]
+        self.edges = []         # List of (row, col) tuples for connected nodes
+        self.is_border = is_border  # Whether node is on terrain boundary
+```
+
+### Path Search
+
+#### a_star_search
+
+Finds the optimal path between start and goal nodes using A* algorithm with terrain-aware cost functions.
+
+```python
+def a_star_search(
+    terrain: terrain_util.SubTerrain,
+    start: np.ndarray, 
+    goal: np.ndarray,
+    max_z_diff: float = 2.1,
+    max_jump_xy_dist: float = 3.0,
+    max_jump_z_diff: float = 0.3,
+    min_jump_z_diff: float = -1.0,
+    w_z: float = 1.0,
+    w_xy: float = 1.0,
+    w_bumpy: float = 1.0,
+    max_bumpy: float = 0.2,
+    stochastic_step_cost_fn = None,
+    nav_graph: Optional[list] = None,
+    max_compute_time = 1.0,
+    verbose = False
+) -> Tuple[list, float]
+```
+
+**Cost Function:**
+
+```python
+cost = w_xy * xy_dist² + w_z * z_diff² + w_bumpy * roughness + random_cost
+```
+
+- `xy_dist²`: Squared horizontal distance (favors shorter paths)
+- `z_diff²`: Squared vertical distance (favors flat paths)
+- `roughness`: Mean absolute difference of 3x3 height patch (penalizes bumpy terrain)
+- `random_cost`: Optional stochastic term for path diversity
+
+**Heuristic Function:**
+
+```python
+h(node, goal) = ||node.pos - goal.pos||  # Euclidean distance
+```
+
+**Parameters:**
+
+- `terrain` (SubTerrain): Heightfield terrain
+- `start` (ndarray): Start grid index [x, y]
+- `goal` (ndarray): Goal grid index [x, y]
+- `max_z_diff`, `max_jump_xy_dist`, `max_jump_z_diff`, `min_jump_z_diff`: Graph construction parameters (ignored if `nav_graph` provided)
+- `w_z` (float): Vertical movement cost weight
+- `w_xy` (float): Horizontal movement cost weight
+- `w_bumpy` (float): Terrain roughness penalty weight
+- `max_bumpy` (float): Maximum roughness threshold (clamped)
+- `stochastic_step_cost_fn` (callable): Optional function returning random cost per step
+- `nav_graph` (list): Pre-computed navigation graph (if None, constructs new graph)
+- `max_compute_time` (float): Maximum search time in seconds
+- `verbose` (bool): Print timing information
+
+**Returns:**
+
+- `path` (list): List of grid indices representing the path, or None if no path found
+- `cost` (float): Total path cost, or None if no path found
+
+**Example:**
+
+```python
+import numpy as np
+
+# Define start and goal positions
+start_idx = np.array([10, 10], dtype=np.int64)
+goal_idx = np.array([90, 90], dtype=np.int64)
+
+# Find path with custom cost weights
+path, cost = astar.a_star_search(
+    terrain=terrain,
+    start=start_idx,
+    goal=goal_idx,
+    w_z=0.2,      # Low weight = tolerate vertical changes
+    w_xy=1.0,     # Standard horizontal cost
+    w_bumpy=2.0,  # High weight = avoid rough terrain
+    max_bumpy=0.15,
+    verbose=True
+)
+
+if path is not None:
+    print(f"Found path with {len(path)} nodes, cost: {cost:.2f}")
+```
+
+#### run_a_star_on_start_end_nodes
+
+Wrapper function that runs A* with AStarSettings and returns 3D world-space path points.
+
+```python
+def run_a_star_on_start_end_nodes(
+    terrain: terrain_util.SubTerrain, 
+    start_node, 
+    end_node, 
+    settings: AStarSettings,
+    nav_graph = None
+) -> Union[torch.Tensor, bool]
+```
+
+**Post-processing:**
+
+- Converts grid indices to 3D world positions
+- Subdivides long jumps into intermediate points
+- Returns False if path not found or cost exceeds `settings.max_cost`
+
+**Returns:**
+
+- `path_nodes_3dpos` (Tensor): [num_points, 3] tensor of world positions, or False if failed
+
+### Path Sampling
+
+#### pick_random_start_end_nodes
+
+Randomly samples valid start and goal nodes with minimum separation.
+
+```python
+def pick_random_start_end_nodes(
+    terrain: terrain_util.SubTerrain,
+    min_dist = 4.0, 
+    max_attempts = 1000
+) -> Tuple[torch.Tensor, torch.Tensor]
+```
+
+#### pick_random_start_end_nodes_on_edges
+
+Samples start/goal near terrain borders (useful for traversal tasks).
+
+```python
+def pick_random_start_end_nodes_on_edges(
+    terrain: terrain_util.SubTerrain,
+    min_dist = 7.0, 
+    max_attempts = 1000
+) -> Tuple[torch.Tensor, torch.Tensor]
+```
+
+### Alternative Path Generators
+
+#### catmull_rom_path
+
+Generates smooth curved path using Catmull-Rom spline interpolation.
+
+```python
+def catmull_rom_path(
+    terrain: terrain_util.SubTerrain, 
+    control_points = None, 
+    num_samples = 200
+) -> torch.Tensor
+```
+
+**Parameters:**
+
+- `control_points` (list): List of [x, y] control points (if None, generates 6 random points)
+- `num_samples` (int): Initial sampling rate (auto-adjusted based on path length)
+
+**Returns:**
+
+- `path_points` (Tensor): [num_points, 3] path positions with heights from terrain
+
+#### straight_line
+
+Generates direct linear path between two points.
+
+```python
+def straight_line(
+    terrain: terrain_util.SubTerrain, 
+    start_node = None, 
+    end_node = None
+) -> torch.Tensor
+```
+
+**Returns:**
+
+- `path_points_xyz` (Tensor): [num_points, 3] linearly interpolated path with terrain heights
+
+## MDM Path Generation
+
+The MDM path module (`mdm_path.py`) generates realistic character motion along planned paths using Motion Diffusion Models.
+
+### MDMPathSettings
+
+Configuration for MDM-based path following.
+
+```python
+class MDMPathSettings:
+    next_node_lookahead = 7        # How far ahead to look for next target
+    rewind_num_frames = 5          # Overlap frames between motion segments
+    end_of_path_buffer = 2         # Extra nodes before considering path complete
+    max_motion_length = 10.0       # Maximum motion duration in seconds
+    path_batch_size = 16           # Batch size for parallel path generation
+    mdm_batch_size = 32            # Batch size for MDM inference
+    top_k = 4                      # Number of best motions to return
+    w_target = 2.0                 # Weight for target reaching loss
+    w_contact = 0.1                # Weight for contact loss
+    w_pen = 0.1                    # Weight for penetration loss
+```
+
+### Motion Generation
+
+#### generate_frames_until_end_of_path
+
+Main function for generating motion that follows a path from start to end.
+
+```python
+def generate_frames_until_end_of_path(
+    path_nodes: torch.Tensor,
+    terrain: terrain_util.SubTerrain,
+    char_model: kin_char_model.KinCharModel,
+    mdm_model: mdm.MDM,
+    prev_frames: Optional[MotionFrames],
+    mdm_path_settings: MDMPathSettings,
+    mdm_gen_settings: gen_util.MDMGenSettings,
+    add_noise_to_loss = True,
+    verbose: bool = True,
+    slice_terrain = True,
+    first_heading_mode = "auto"
+) -> Tuple[List[motion_util.MotionFrames], List[terrain_util.SubTerrain], dict]
+```
+
+**Generation Process:**
+
+1. **Initialization:** Generate motion at path start with appropriate heading
+2. **Autoregressive Loop:**
+   - Extract previous frames (with overlap)
+   - Find closest path node to current position
+   - Look ahead `next_node_lookahead` nodes for target
+   - Generate motion segment toward target using MDM
+   - Check if character reached end of path
+   - Repeat until done or time limit
+3. **Batch Evaluation:** Compute losses for all generated motions
+4. **Selection:** Sort by loss and return top-k motions
+
+**Parameters:**
+
+- `path_nodes` (Tensor): [num_nodes, 3] path positions in world space
+- `terrain` (SubTerrain): Heightfield terrain
+- `char_model` (KinCharModel): Character kinematic model
+- `mdm_model` (MDM): Trained motion diffusion model
+- `prev_frames` (MotionFrames): Optional previous motion for continuation
+- `mdm_path_settings` (MDMPathSettings): Path following configuration
+- `mdm_gen_settings` (MDMGenSettings): MDM generation settings
+- `add_noise_to_loss` (bool): Add noise to loss for diversity in selection
+- `verbose` (bool): Print progress messages
+- `slice_terrain` (bool): Extract local terrain patches per motion
+- `first_heading_mode` (str): "auto" (toward next node) or "random"
+
+**Returns:**
+
+- `sorted_motion_frames` (list): List of MotionFrames sorted by loss (best first)
+- `sorted_motion_terrains` (list): Corresponding terrain patches
+- `info` (dict): Dictionary with keys:
+  - `"losses"`: Sorted total losses
+  - `"contact_losses"`: Contact loss terms
+  - `"pen_losses"`: Penetration loss terms
+
+**Example:**
+
+```python
+import parc.motion_synthesis.procgen.astar as astar
+import parc.motion_synthesis.procgen.mdm_path as mdm_path
+
+# 1. Plan path using A*
+settings = astar.AStarSettings()
+path_3d = astar.run_a_star_on_start_end_nodes(
+    terrain=terrain,
+    start_node=start_idx,
+    end_node=goal_idx,
+    settings=settings
+)
+
+# 2. Generate motion along path
+path_settings = mdm_path.MDMPathSettings()
+path_settings.mdm_batch_size = 16
+path_settings.max_motion_length = 15.0
+
+motions, terrains, info = mdm_path.generate_frames_until_end_of_path(
+    path_nodes=path_3d,
+    terrain=terrain,
+    char_model=char_model,
+    mdm_model=mdm_model,
+    prev_frames=None,
+    mdm_path_settings=path_settings,
+    mdm_gen_settings=mdm_gen_settings,
+    verbose=True
+)
+
+# 3. Select best motion
+best_motion = motions[0]
+best_terrain = terrains[0]
+print(f"Best motion loss: {info['losses'][0]:.4f}")
+```
+
+#### generate_frames_along_path
+
+Generates a single motion segment toward the next path node.
+
+```python
+def generate_frames_along_path(
+    prev_frames: MotionFrames,
+    path_nodes_xyz: torch.Tensor,
+    terrain: terrain_util.SubTerrain,
+    char_model: kin_char_model.KinCharModel,
+    mdm_model: mdm.MDM,
+    mdm_settings: gen_util.MDMGenSettings,
+    path_settings: MDMPathSettings,
+    verbose: bool = True
+) -> Tuple[MotionFrames, torch.Tensor]
+```
+
+**Returns:**
+
+- `gen_motion_frames` (MotionFrames): Generated motion segment
+- `done` (Tensor): Boolean tensor indicating which motions reached the end
+
+#### gen_mdm_motion_at_path_start
+
+Initializes motion at the first path node.
+
+```python
+def gen_mdm_motion_at_path_start(
+    path_nodes_xyz: torch.Tensor, 
+    terrain: terrain_util.SubTerrain,
+    char_model: kin_char_model.KinCharModel,
+    mdm_model: mdm.MDM,
+    mdm_settings: gen_util.MDMGenSettings,
+    prev_frames: Optional[MotionFrames],
+    batch_size: int,
+    heading_mode = "auto"
+) -> MotionFrames
+```
+
+**Heading Modes:**
+
+- `"auto"`: Face toward second path node
+- `"random"`: Random heading in [0, 2π]
+
+### Motion Loss Computation
+
+#### compute_motion_loss
+
+Evaluates how well motion follows the path and respects terrain constraints.
+
+```python
+def compute_motion_loss(
+    motion_frames: MotionFrames, 
+    path_nodes: torch.Tensor,
+    terrain: terrain_util.SubTerrain,
+    char_model: kin_char_model.KinCharModel,
+    body_points: list,
+    w_contact: float,
+    w_pen: float,
+    w_path: float,
+    verbose: bool = True
+) -> dict
+```
+
+**Loss Components:**
+
+1. **Penetration Loss:** `sum(clamp(-sdf, max=0)) * w_pen`
+2. **Contact Loss:** `sum(sdf * contacts) * w_contact`
+3. **Path Following Loss:** (Currently unused, reserved for future trajectory tracking)
+
+**Parameters:**
+
+- `motion_frames` (MotionFrames): Generated motion with batch dimension
+- `path_nodes` (Tensor): Path node positions
+- `terrain` (SubTerrain): Terrain for SDF queries
+- `char_model` (KinCharModel): Character model
+- `body_points` (list): Per-body sampled points for collision
+- `w_contact`, `w_pen`, `w_path`: Loss weights
+
+**Returns:**
+
+- Dictionary with keys: `"total_loss"`, `"contact_loss"`, `"pen_loss"`
+
+### Utility Functions
+
+#### get_closest_path_node_idx
+
+Finds the nearest path node to character position.
+
+```python
+def get_closest_path_node_idx(
+    root_pos: torch.Tensor, 
+    path_nodes_xyz: torch.Tensor
+) -> torch.Tensor
+```
+
+**Parameters:**
+
+- `root_pos` (Tensor): [batch_size, 3] character root positions
+- `path_nodes_xyz` (Tensor): [num_nodes, 3] path positions
+
+**Returns:**
+
+- `closest_node_idx` (Tensor): [batch_size] indices of closest nodes
+
+#### gen_mdm_motion_at_xy
+
+Generates motion starting at arbitrary XY positions with random targets.
+
+```python
+def gen_mdm_motion_at_xy(
+    xy: torch.Tensor,
+    terrain: terrain_util.SubTerrain,
+    char_model: kin_char_model.KinCharModel,
+    mdm_model: mdm.MDM,
+    mdm_settings: gen_util.MDMGenSettings
+) -> MotionFrames
+```
+
+**Use Case:** Generating diverse motions from multiple spawn points without a predefined path.
+
+## Complete Workflow Example
+
+```python
+import torch
+import parc.motion_synthesis.procgen.astar as astar
+import parc.motion_synthesis.procgen.mdm_path as mdm_path
+import parc.motion_synthesis.motion_opt.motion_optimization as motion_opt
+import parc.util.geom_util as geom_util
+
+# Step 1: Plan path
+astar_settings = astar.AStarSettings()
+astar_settings.max_jump_xy_dist = 3.5
+astar_settings.w_bumpy = 1.5
+
+start, goal = astar.pick_random_start_end_nodes(terrain, min_dist=8.0)
+path_3d = astar.run_a_star_on_start_end_nodes(
+    terrain=terrain,
+    start_node=start,
+    end_node=goal,
+    settings=astar_settings
+)
+
+if path_3d is False:
+    print("Path planning failed")
+    exit()
+
+# Step 2: Generate motion along path
+path_settings = mdm_path.MDMPathSettings()
+path_settings.mdm_batch_size = 32
+path_settings.next_node_lookahead = 10
+
+motions, terrains, info = mdm_path.generate_frames_until_end_of_path(
+    path_nodes=path_3d,
+    terrain=terrain,
+    char_model=char_model,
+    mdm_model=mdm_model,
+    prev_frames=None,
+    mdm_path_settings=path_settings,
+    mdm_gen_settings=mdm_gen_settings,
+    verbose=True
+)
+
+# Step 3: Optimize best motion
+best_motion = motions[0]
+best_terrain = terrains[0]
+
+body_points = geom_util.get_char_point_samples(char_model)
+optimized_motion = motion_opt.motion_contact_optimization(
+    src_motion_frames=best_motion.squeeze(0),  # Remove batch dim
+    body_points=body_points,
+    terrain=best_terrain,
+    char_model=char_model,
+    num_iters=1000,
+    step_size=0.005,
+    w_root_pos=1.0,
+    w_root_rot=1.0,
+    w_joint_rot=1.0,
+    w_smoothness=0.5,
+    w_penetration=100.0,
+    w_contact=20.0,
+    w_sliding=10.0,
+    w_body_constraints=0.0,
+    w_jerk=0.1,
+    body_constraints=None,
+    max_jerk=1000.0,
+    exp_name="path_motion_opt",
+    use_wandb=False,
+    log_file=None
+)
+
+print("Motion synthesis complete!")
+```
+
+## Performance Tips
+
+1. **Reuse Navigation Graph:** Pre-compute the nav graph once and pass to multiple `a_star_search` calls
+2. **Batch Size Tuning:** Larger `mdm_batch_size` increases diversity but uses more memory
+3. **Path Simplification:** For long paths, consider downsampling nodes to reduce computation
+4. **Terrain Slicing:** Enable `slice_terrain=True` to reduce memory for large heightfields
+5. **Early Stopping:** Reduce `max_motion_length` if paths are shorter than expected
+
+## Related Modules
+
+- [Motion Optimization](/api/motion-synthesis/motion-optimization) - Refine generated motion
+- Motion Diffusion Model - Core MDM implementation
+- Terrain Utilities - Heightfield operations and SDF computation

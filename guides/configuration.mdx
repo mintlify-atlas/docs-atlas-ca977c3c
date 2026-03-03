@@ -1,0 +1,491 @@
+---
+title: Configuration Files
+description: Understanding and managing PARC configuration files
+---
+
+PARC uses YAML configuration files to control all aspects of the pipeline. This guide explains the configuration system and common patterns.
+
+## Configuration Overview
+
+Each stage of PARC uses its own config file:
+
+1. **parc_1_train_gen**: Motion diffusion model training
+2. **parc_2_kin_gen**: Kinematic motion synthesis
+3. **parc_3_tracker**: Physics-based tracking controller training  
+4. **parc_4_phys_record**: Recording physics-based motions
+
+Additional configs:
+- **create_dataset_config**: Dataset assembly
+- **motionscope_config**: Viewer settings
+- **motion_opt configs**: Optimization parameters
+
+## Path Resolution
+
+PARC configs support path variables:
+
+### Environment Variables
+
+```yaml
+motion_lib_file: "$DATA_DIR/Data/parkour_dataset/motions.yaml"
+output_dir: "$DATA_DIR/tests/parc/iter_1/"
+```
+
+**Setup**:
+```bash
+export DATA_DIR="/path/to/your/data"
+```
+
+### Relative Paths
+
+Paths are resolved relative to the repository root:
+
+```yaml
+char_file: "data/assets/humanoid.xml"
+sampler_save_filepath: "output/parc/sampler.pkl"
+```
+
+## Common Configuration Patterns
+
+### Device Selection
+
+All configs use the `device` field:
+
+```yaml
+device: "cuda:0"   # First GPU
+device: "cuda:1"   # Second GPU  
+device: "cpu"      # CPU only (slow)
+```
+
+### Weights & Biases Logging
+
+Many stages support wandb:
+
+```yaml
+use_wandb: True   # Enable tracking
+use_wandb: False  # Disable (for debugging)
+```
+
+**Setup**:
+```bash
+wandb login
+```
+
+### Output Directories
+
+All stages write to `output_dir`:
+
+```yaml
+output_dir: "output/parc/stage_name/"
+```
+
+Directories are created automatically if they don't exist.
+
+## Configuration by Stage
+
+### 1. Motion Generator Training
+
+**File**: `data/configs/parc_1_train_gen_default.yaml`
+
+**Key sections**:
+```yaml
+# Training settings
+epochs: 100000
+batch_size: 64
+lr: 0.00001
+
+# Model architecture  
+d_model: 256
+num_heads: 8
+num_layers: 4
+
+# Data
+motion_lib_file: "path/to/motions.yaml"
+char_file: "data/assets/humanoid.xml"
+sequence_duration: 0.5
+sequence_fps: 30
+
+# Conditioning
+use_heightmap_obs: True
+use_target_obs: True
+num_prev_states: 2
+
+# Output
+output_dir: "output/train_gen/"
+sampler_save_filepath: "output/sampler.pkl"
+```
+
+See [Training Motion Generator](/guides/training-motion-generator) for details.
+
+### 2. Motion Synthesis
+
+**File**: `data/configs/parc_2_kin_gen_default.yaml`
+
+**Key sections**:
+```yaml
+# Model
+mdm_model_path: "path/to/model.ckpt"
+
+# Generation
+num_new_motions: 100
+motion_id_offset: 0
+save_name: "BOXES"
+
+# Terrain  
+procgen_mode: "BOXES"  # BOXES, PATHS, STAIRS, FILE
+new_terrain_dim_x: 16
+new_terrain_dim_y: 16
+dx: 0.4
+dy: 0.4
+
+# Quality filtering
+max_contact_loss: 3.0
+max_pen_loss: 8.0  
+max_total_loss: 30.0
+
+# Optimization
+use_opt: True
+remove_hesitation: True
+
+opt:
+  num_iters: 3000
+  w_penetration: 1000.0
+  w_contact: 1000.0
+  # ... more weights
+```
+
+See [Motion Synthesis](/guides/motion-synthesis) for details.
+
+### 3. Tracking Controller
+
+**File**: `data/configs/parc_3_tracker_default.yaml`
+
+**Key sections**:
+```yaml
+# Configs
+env_config: "data/configs/tracker_config/dm_env_default.yaml"
+agent_config: "data/configs/tracker_config/dm_agent_default.yaml"
+
+# Dataset
+dataset_file: "path/to/motions.yaml"
+create_dataset_config: "data/configs/create_dataset_config.yaml"
+
+# Training
+num_envs: 2048
+max_samples: 10000000000
+device: "cuda:0"
+
+# Continue from checkpoint (optional)
+in_model_file: "path/to/model.pt"
+
+# Output
+output_dir: "output/tracker/"
+```
+
+See [Motion Tracking Controller](/guides/motion-tracking-controller) for details.
+
+### 4. Recording Motions
+
+**File**: `data/configs/parc_4_phys_record_default.yaml`
+
+**Key sections**:
+```yaml
+# Model and configs
+model_file: "output/tracker/model.pt"
+env_file: "data/configs/tracker_config/dm_env_default.yaml" 
+agent_file: "data/configs/tracker_config/dm_agent_default.yaml"
+
+# Dataset to record
+create_dataset_config: "data/configs/create_dataset_config.yaml"
+
+# Output
+output_dir: "output/recorded/"
+device: "cuda:0"
+```
+
+See [Recording Motions](/guides/recording-motions) for details.
+
+## Dataset Configuration
+
+### Motion Library Format
+
+Dataset YAML files list motions with weights:
+
+```yaml
+motions:
+  - motion_file: "data/motions/walk_01.pkl"
+    weight: 1.0
+  - motion_file: "data/motions/run_01.pkl"
+    weight: 2.0      # Sampled 2x more often
+  - motion_file: "data/motions/jump_01.pkl"
+    weight: 0.5      # Sampled 0.5x as often
+```
+
+**Weights** control sampling frequency during training:
+- Higher weight = sampled more often
+- Use to balance dataset (e.g., lots of walking, few climbing)
+
+### Create Dataset Config
+
+Automatically generates dataset YAML from directories:
+
+```yaml
+save_path: "output/dataset/motions.yaml"
+
+motion_dirs:
+  - path: "data/motions/walking/"
+    weight: 1.0
+    pattern: "*.pkl"
+  - path: "data/motions/running/" 
+    weight: 2.0
+    pattern: "*_opt.pkl"
+```
+
+## Character Configuration
+
+**File**: `data/assets/humanoid.xml`
+
+Defines character skeleton:
+- Joint hierarchy
+- Body part names
+- Collision geometry
+- Mass and inertia properties
+
+Used by:
+- Motion generator (for body positions)
+- Tracking controller (for PD targets)
+- MotionScope (for visualization)
+
+## Optimization Configuration
+
+Standalone optimization configs in `PARC/motion_synthesis/motion_opt/config/`:
+
+**Example**: `motion_opt.yaml`
+
+```yaml
+motions_yaml_path: "path/to/motion.pkl"
+device: "cuda:0"
+output_folder_path: "output/opt/"
+char_model: "data/assets/humanoid.xml"
+
+use_wandb: True
+num_iters: 1000
+step_size: 0.001
+
+# Loss weights
+w_root_pos: 1.0
+w_root_rot: 10.0
+w_joint_rot: 1.0  
+w_smoothness: 10.0
+w_penetration: 100.0
+w_contact: 0.0
+w_sliding: 1000.0
+w_body_constraints: 500.0
+
+# Preprocessing
+frame_stride: 4        # Subsample frames
+make_looping: True     # Make motion loop
+
+# Character point sampling
+char_point_samples:
+  sphere_num_subdivisions: 0
+  box_num_slices: 2
+  box_dim_x: 2
+  box_dim_y: 2
+  capsule_num_circle_points: 2
+  capsule_num_sphere_subdivisions: 0
+  capsule_num_cylinder_slices: 1
+```
+
+## MotionScope Configuration
+
+**File**: `PARC/motionscope/motionscope_config.yaml`
+
+```yaml
+load_mdm: False                  # Load MDM for generation
+use_contact_info: True           # Display contact labels
+use_legacy_file_format: False    # File format version
+
+motions:
+  - ["data/motion_terrains/sfu.pkl", "humanoid"]
+  - ["data/motion_terrains/climb.pkl", "humanoid"]
+
+terrain_mesh_mode: "simple"     # "simple" or "greedy"
+load_other_motion_terrains: False
+input_folder_dir: "data/terrains/"
+
+mdm_filepaths:
+  main: "path/to/model.ckpt"
+```
+
+See [MotionScope Viewer](/guides/motionscope-viewer) for details.
+
+## Managing Iterations
+
+For multi-iteration PARC training, organize configs by iteration:
+
+```
+configs/
+├── iter_1/
+│   ├── train_gen.yaml
+│   ├── kin_gen.yaml
+│   ├── tracker.yaml
+│   └── record.yaml
+├── iter_2/
+│   ├── train_gen.yaml
+│   ├── kin_gen.yaml
+│   ├── tracker.yaml
+│   └── record.yaml
+└── ...
+```
+
+**Chain iterations**:
+
+```yaml
+# iter_2/train_gen.yaml
+motion_lib_file: "output/iter_1/recorded/motions.yaml"  # Uses iter_1 output
+
+# iter_2/tracker.yaml  
+in_model_file: "output/iter_1/tracker/model.pt"         # Continues from iter_1
+```
+
+## Configuration Best Practices
+
+### 1. Use Environment Variables
+
+```bash
+# .bashrc or .zshrc
+export DATA_DIR="/mnt/data/parc"
+export PARC_OUTPUT="/mnt/output/parc"
+```
+
+```yaml
+# In configs
+motion_lib_file: "$DATA_DIR/motions.yaml"
+output_dir: "$PARC_OUTPUT/iter_1/"
+```
+
+### 2. Version Control Configs
+
+```bash
+git add data/configs/
+git commit -m "Add iteration 3 configs"
+```
+
+Track config changes alongside code changes.
+
+### 3. Document Custom Configs
+
+Add comments:
+
+```yaml
+# Increased from 64 to 128 for better diversity
+mdm_batch_size: 128
+
+# Reduced from 3.0 to 2.0 to be more strict
+max_contact_loss: 2.0
+```
+
+### 4. Use Config Templates
+
+Create base configs and inherit:
+
+```yaml
+# base_gen.yaml
+epochs: 100000
+batch_size: 64
+lr: 0.00001
+# ... common settings
+
+# iter_1_gen.yaml
+<<: *base_gen
+motion_lib_file: "$DATA_DIR/iter_1/motions.yaml"
+output_dir: "$DATA_DIR/iter_1/output/"
+```
+
+### 5. Validate Before Running
+
+Check paths exist:
+
+```bash
+# Verify paths in config
+ls $DATA_DIR/Data/parkour_dataset/motions.yaml
+ls data/assets/humanoid.xml
+```
+
+## Troubleshooting
+
+### Path Not Found
+
+**Symptoms**: "error opening file" errors
+
+**Solutions**:
+- Check `$DATA_DIR` is set: `echo $DATA_DIR`
+- Use absolute paths for debugging
+- Verify file exists at resolved path
+- Check permissions
+
+### Config Parsing Errors
+
+**Symptoms**: YAML syntax errors
+
+**Solutions**:
+- Validate YAML: `python -c "import yaml; yaml.safe_load(open('config.yaml'))"`
+- Check indentation (use spaces, not tabs)
+- Quote strings with special characters
+- Ensure lists use `- ` prefix
+
+### Wrong Values Used
+
+**Symptoms**: Training uses unexpected settings
+
+**Solutions**:
+- Verify correct config file passed: `--config path/to/config.yaml`
+- Check for typos in parameter names
+- Print loaded config at runtime for debugging
+- Ensure no conflicting defaults
+
+## Advanced Configuration
+
+### Conditional Configs
+
+Use YAML anchors for shared settings:
+
+```yaml
+defaults: &defaults
+  device: "cuda:0"
+  use_wandb: True
+
+stage_1:
+  <<: *defaults
+  epochs: 10000
+
+stage_2:  
+  <<: *defaults
+  epochs: 20000
+```
+
+### Config Overrides
+
+Some scripts support command-line overrides:
+
+```bash
+python script.py --config base.yaml --epochs 50000 --lr 0.0001
+```
+
+### Nested Configs
+
+Configs can reference other configs:
+
+```yaml
+create_dataset_config: "data/configs/create_dataset_config.yaml"
+env_config: "data/configs/tracker_config/dm_env_default.yaml"
+```
+
+The script loads and merges these automatically.
+
+## Next Steps
+
+- **Start pipeline**: Begin with [Training Motion Generator](/guides/training-motion-generator)
+- **Customize**: Modify configs for your character and task
+- **Iterate**: Run full PARC loop with custom configs
+- **Visualize**: Use [MotionScope](/guides/motionscope-viewer) to review results

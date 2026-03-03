@@ -1,0 +1,306 @@
+---
+title: Recording Motions
+description: Record physics-based motions from the trained tracking controller
+---
+
+The recording stage runs your trained tracking controller in simulation to produce physics-based versions of the kinematic reference motions. Only successfully tracked motions are saved back to the dataset.
+
+## Overview
+
+The recording process:
+- Loads a trained tracking controller
+- Runs tracking in parallel environments
+- Records the physics simulation output
+- Filters out failed tracking attempts
+- Handles partial tracking with multiple starting points
+- Saves successful recordings as new motion files
+
+## Quick Start
+
+<Steps>
+  <Step title="Prepare configuration">
+    Create a config file with paths to your model and dataset:
+    ```yaml
+    output_dir: "output/recorded/"
+    device: "cuda:0"
+    model_file: "output/tracker/model.pt"
+    env_file: "data/configs/tracker_config/dm_env_default.yaml"
+    agent_file: "data/configs/tracker_config/dm_agent_default.yaml"
+    create_dataset_config: "data/configs/create_dataset_config.yaml"
+    ```
+  </Step>
+
+  <Step title="Run recording">
+    ```bash
+    python scripts/parc_4_phys_record.py --config path/to/config.yaml
+    ```
+    
+    Or use default config:
+    ```bash
+    python scripts/parc_4_phys_record.py --config data/configs/parc_4_phys_record_default.yaml
+    ```
+  </Step>
+
+  <Step title="Check outputs">
+    Successfully recorded motions are saved to:
+    ```
+    output_dir/recorded_motions/
+    ├── motion_0.pkl
+    ├── motion_1.pkl
+    └── ...
+    ```
+  </Step>
+</Steps>
+
+## Configuration Guide
+
+### Basic Configuration
+
+```yaml
+output_dir: "output/recorded/"      # Output directory
+device: "cuda:0"                    # GPU device
+
+# Trained model and configs
+model_file: "output/tracker/iter_1/model.pt"
+env_file: "data/configs/tracker_config/dm_env_default.yaml"
+agent_file: "data/configs/tracker_config/dm_agent_default.yaml"
+
+# Dataset to record
+create_dataset_config: "data/configs/create_dataset_config.yaml"
+```
+
+### How It Works
+
+The script performs the following:
+
+1. **Load dataset config** - Reads `create_dataset_config` to get the list of reference motions
+2. **Count motions** - Determines how many parallel environments to create (one per motion)
+3. **Configure environment** - Sets up recording environment with:
+   - `motion_file`: Path to dataset YAML
+   - `output_motion_dir`: Where to save recorded motions
+4. **Run recording** - Executes tracking controller in "record" mode
+5. **Save results** - Writes successfully tracked motions to output directory
+
+### Environment Configuration
+
+The recording script automatically modifies the environment config:
+
+```python
+phys_record_env_config["env"]["dm"]["motion_file"] = str(dataset_file_path)
+phys_record_env_config["env"]["dm"]["terrain_save_path"] = str(output_dir / "terrain.pkl")
+phys_record_env_config["env"]["output_motion_dir"] = str(output_dir / "recorded_motions")
+```
+
+This ensures:
+- The environment loads the correct reference motions
+- Terrain data is saved for debugging
+- Recorded motions go to the right directory
+
+## Recording Process Details
+
+### Parallel Recording
+
+The script creates one environment per motion in the dataset, allowing all motions to be tracked in parallel:
+
+```python
+num_motions = len(dataset["motions"])
+num_envs = num_motions
+```
+
+This dramatically speeds up recording when you have a GPU with sufficient memory.
+
+### Success Filtering
+
+Only motions that are successfully tracked without early termination are saved. This prevents failed or low-quality motions from being added back to the dataset.
+
+### Partial Tracking Recovery
+
+From the guide documentation:
+
+> Sometimes a reference motion has a particular segment that is too difficult to track, but the rest of the motion is interesting and is able to be tracked. This script helps address this case by attempting to record at different starting times.
+
+**Strategy**:
+1. Try tracking the full motion from the start
+2. If it fails, try starting at a later time (e.g., 25% through)
+3. If still failing, try starting at 50% through  
+4. Give up if tracking still fails
+
+This allows partial recovery of motions with difficult segments.
+
+## Output Structure
+
+```
+output_dir/
+├── recorded_motions/
+│   ├── motion_0.pkl
+│   ├── motion_1.pkl
+│   └── ...
+├── terrain.pkl              # Terrain data (debugging)
+├── record_env.yaml          # Environment config used
+└── record_args.txt          # Recording command arguments
+```
+
+### Recorded Motion Format
+
+Each `.pkl` file contains physics-based motion data:
+- Root positions and rotations (from physics sim)
+- Joint rotations (from PD controller)
+- Contact states (from physics sim)
+- Terrain heightfield
+- Metadata (fps, loop mode, etc.)
+
+## Integration with PARC Loop
+
+In the full PARC pipeline:
+
+```bash
+# Iteration 1
+python scripts/parc_1_train_gen.py --config iter1_gen_config.yaml
+python scripts/parc_2_kin_gen.py --config iter1_kin_gen_config.yaml
+python scripts/parc_3_tracker.py --config iter1_tracker_config.yaml
+python scripts/parc_4_phys_record.py --config iter1_record_config.yaml
+
+# Recorded motions from iter1 are added to dataset for iter2
+# Iteration 2
+python scripts/parc_1_train_gen.py --config iter2_gen_config.yaml  # Trains on iter1 + initial data
+# ... repeat
+```
+
+The recorded physics-based motions become reference motions for the next iteration's generator training.
+
+## Command Line Arguments
+
+The script builds arguments for the underlying `run_tracker.main()` function:
+
+```bash
+run.py
+--env_config <modified_env_config>
+--agent_config <agent_config>
+--model_file <trained_model>
+--num_envs <num_motions>
+--device <device>
+--mode record
+--visualize False
+```
+
+**Key argument**: `--mode record` tells the environment to save motions instead of training.
+
+## Important Files
+
+- `scripts/parc_4_phys_record.py` - Recording launcher script
+- `parc/motion_tracker/run_tracker.py` - Main execution with "record" mode
+- `parc/motion_tracker/envs/ig_parkour/dm_env.py` - Environment that handles recording
+
+## Troubleshooting
+
+### No Motions Saved
+
+**Symptoms**: `recorded_motions/` directory is empty
+
+**Causes**:
+- Tracking controller fails on all motions
+- Early termination triggers on every motion
+- Reference motions are too difficult
+
+**Solutions**:
+- Check if tracker was trained long enough
+- Visualize tracking to see failure modes
+- Review termination conditions in environment config
+- Try recording with a subset of simpler motions first
+
+### Out of Memory
+
+**Symptoms**: CUDA out of memory during recording
+
+**Causes**:
+- Too many parallel environments (one per motion)
+
+**Solutions**:
+- Record in batches: split dataset into smaller chunks
+- Reduce number of motions in `create_dataset_config`
+- Use a GPU with more memory
+- Reduce environment observation/state sizes
+
+### Recording Takes Too Long
+
+**Symptoms**: Recording runs for hours
+
+**Causes**:
+- Large dataset with many motions
+- Long motion sequences
+
+**Solutions**:
+- Ensure GPU is being used (`device: "cuda:0"`)
+- Check that parallel environments are working (should be fast)
+- Use fewer motions per batch
+- Verify no visualization is enabled
+
+### Motions Look Different from Reference
+
+**Symptoms**: Recorded motions don't match kinematic references
+
+**Causes**:
+- Tracking controller not trained well
+- Physics simulation settings differ from training
+- Reference motions are physically infeasible
+
+**Solutions**:
+- Train tracker longer or with better hyperparameters
+- Verify physics parameters match training environment
+- Check reference motions with [MotionScope viewer](/guides/motionscope-viewer)
+- Increase reward weights for tracking accuracy
+
+### Dataset Path Errors
+
+**Symptoms**: Cannot find motions, file not found errors
+
+**Causes**:
+- Incorrect path in `create_dataset_config`
+- Relative vs absolute path issues
+
+**Solutions**:
+- Use absolute paths in dataset config
+- Verify motion `.pkl` files exist at specified paths
+- Check `$DATA_DIR` environment variable is set correctly
+- Print the loaded dataset path for debugging
+
+## Advanced Usage
+
+### Recording Specific Motions
+
+To record only a subset of motions:
+
+1. Create a temporary dataset config with only those motions
+2. Point `create_dataset_config` to the temporary config
+3. Run recording
+
+### Batch Recording
+
+For very large datasets:
+
+```python
+# Split dataset into batches of 100 motions
+# Create configs: batch_0_config.yaml, batch_1_config.yaml, ...
+# Run recording on each batch
+```
+
+### Debugging Failed Recordings
+
+To visualize why recording fails:
+
+```yaml
+# In the recording command, enable visualization
+--visualize True
+```
+
+This shows the Isaac Gym viewer so you can see tracking failures.
+
+## Next Steps
+
+After recording:
+
+1. **Add to dataset**: Include recorded motions in your motion library for the next PARC iteration
+2. **Visualize**: Use [MotionScope](/guides/motionscope-viewer) to review recorded motions
+3. **Iterate**: Train a new generator on the expanded dataset
+
+The recorded physics-based motions are more physically consistent and can improve the quality of future generations.

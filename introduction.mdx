@@ -1,0 +1,114 @@
+---
+title: Introduction
+description: Physics-based Augmentation with Reinforcement Learning for Character Controllers
+---
+
+<img
+  src="https://michaelx.io/parc/static/images/teaser.jpg"
+  alt="PARC Teaser"
+/>
+
+## What is PARC?
+
+PARC (Physics-based Augmentation with Reinforcement Learning for Character Controllers) is a self-consuming, self-correcting generative model framework that combines kinematic motion generation with physics-based tracking controllers. Presented at **SIGGRAPH 2025**, PARC generates spatial, temporal, and functional variations of motions while iteratively improving quality through physics validation.
+
+The framework trains both a motion diffusion model for kinematic motion generation and a PPO-based tracking controller for physics validation, creating an iterative self-improvement loop that produces realistic, physically-plausible character animations.
+
+<Note>
+PARC was developed by Michael Xu, Yi Shi, KangKang Yin, and Xue Bin Peng. Project page: [https://michaelx.io/parc](https://michaelx.io/parc)
+</Note>
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Motion Diffusion Model" icon="wand-magic-sparkles">
+    Transformer-based architecture with local heightmap and target direction conditioning for procedural motion generation
+  </Card>
+  <Card title="Physics-Based Tracking" icon="running">
+    PPO reinforcement learning controller built on Isaac Gym for physics validation and motion tracking
+  </Card>
+  <Card title="Iterative Self-Improvement" icon="rotate">
+    4-stage PARC loop: train generator → generate motions → train tracker → record physics-validated motions
+  </Card>
+  <Card title="Terrain-Aware Generation" icon="mountain">
+    Procedural terrain generation with A* path planning and autoregressive motion synthesis along paths
+  </Card>
+</CardGroup>
+
+## How PARC Works
+
+The PARC training loop consists of four main stages:
+
+<Steps>
+  <Step title="Train Motion Generator">
+    Train a motion diffusion model on the dataset using heightmap and target direction conditions
+    ```bash
+    python scripts/parc_1_train_gen.py --config path/to/config
+    ```
+  </Step>
+  
+  <Step title="Generate New Motions">
+    Generate terrain, plan paths, and synthesize motions using the trained MDM with kinematic optimization
+    ```bash
+    python scripts/parc_2_kin_gen.py --config path/to/config
+    ```
+  </Step>
+  
+  <Step title="Train Tracking Controller">
+    Train a physics-based tracking controller to follow the generated reference motions
+    ```bash
+    python scripts/parc_3_tracker.py --config path/to/config
+    ```
+  </Step>
+  
+  <Step title="Record Physics-Validated Motions">
+    Record physically-simulated motions that successfully track the references, filtering out failures
+    ```bash
+    python scripts/parc_4_phys_record.py --config path/to/config
+    ```
+  </Step>
+</Steps>
+
+The physics-validated motions from stage 4 are then added back to the dataset, and the loop repeats, continuously improving motion quality and diversity.
+
+## Quick Links
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Set up your development environment with conda, PyTorch, and Isaac Gym
+  </Card>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get started with Motionscope viewer to visualize motions and terrains
+  </Card>
+  <Card title="GitHub Repository" icon="github" href="https://github.com/mshoe/PARC">
+    View source code and contribute to the project
+  </Card>
+  <Card title="Datasets & Models" icon="database" href="https://huggingface.co/datasets/mxucg/PARC">
+    Download pre-trained models and motion datasets from HuggingFace
+  </Card>
+</CardGroup>
+
+## Use Cases
+
+While the SIGGRAPH 2025 demonstration focuses on **terrain-traversal motions** (running, climbing, vaulting), PARC's architecture is designed to be extensible to other character animation tasks:
+
+- Object interaction sequences
+- Multi-character interactions
+- Complex locomotion behaviors
+- Athletic movements and stunts
+
+<Warning>
+The procedural generation modules are optimized for terrain traversal. Applying PARC to different tasks will require custom heuristics and domain knowledge for motion synthesis.
+</Warning>
+
+## Technical Highlights
+
+- **Motion Diffusion Model**: Transformer-based (4 layers, 256 hidden dim, 8 attention heads) with DDIM sampling
+- **Reinforcement Learning**: PPO algorithm for physics-based tracking in Isaac Gym simulator
+- **Motion Representation**: Root position/rotation + joint rotations with contact labels
+- **Conditioning**: Local heightmaps (31×31 grid, 0.2m resolution) + target direction vectors
+- **Augmentation**: Procedural terrain generation, heightfield augmentation, noise injection
+
+## What's Next?
+
+Ready to get started? Check out the [Installation Guide](/installation) to set up your environment, or jump straight to the [Quick Start](/quickstart) to run the Motionscope viewer and explore pre-generated motions.

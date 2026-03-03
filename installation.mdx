@@ -1,0 +1,228 @@
+---
+title: Installation
+description: Set up PARC with conda, PyTorch, and optional Isaac Gym for motion tracking
+---
+
+## System Requirements
+
+PARC has been tested on **Ubuntu 22.04** with CUDA-enabled GPUs.
+
+<Note>
+**Recommended Hardware:**
+- NVIDIA GPU with CUDA support (RTX 4090 for real-time kinematic control, RTX 3090+ for training)
+- 16GB+ RAM
+- Ubuntu 22.04 or compatible Linux distribution
+</Note>
+
+## Installation Steps
+
+<Steps>
+  <Step title="Clone the Repository">
+    Clone the PARC repository from GitHub:
+    
+    ```bash
+    git clone https://github.com/mshoe/PARC.git
+    cd PARC
+    ```
+  </Step>
+
+  <Step title="Create Conda Environment">
+    Create a new conda environment with Python 3.8.20:
+    
+    ```bash
+    conda create -n parc python=3.8.20
+    conda activate parc
+    ```
+    
+    <Warning>
+    Python 3.8.20 is the tested version. Other versions may work but are not officially supported.
+    </Warning>
+  </Step>
+
+  <Step title="Install Dependencies">
+    Install all required packages from requirements.txt:
+    
+    ```bash
+    pip install -r requirements.txt
+    ```
+    
+    This will install:
+    - **PyTorch 2.2.0** - Deep learning framework
+    - **Polyscope** - 3D visualization for Motionscope
+    - **Trimesh & embreex** - Mesh processing
+    - **WandB** - Experiment tracking (v0.17.4+)
+    - **NumPy, SciPy, Matplotlib** - Scientific computing
+    - **Gym 0.26.2** - RL environment interface
+    - **ImageIO** - Video/image I/O with FFmpeg support
+  </Step>
+
+  <Step title="Fix CUDA Detection (if needed)">
+    If PyTorch cannot detect CUDA after installation, reinstall with explicit CUDA version:
+    
+    ```bash
+    pip install torch==2.2.0+cu118 -f https://download.pytorch.org/whl/torch_stable.html
+    ```
+    
+    Verify CUDA is available:
+    ```bash
+    python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+    ```
+  </Step>
+
+  <Step title="Configure Data Directory">
+    Set up the user configuration file to specify your data directory. Create or edit `user_config.yaml` at the repository root:
+    
+    ```yaml user_config.yaml
+    DATA_DIR: "/absolute/path/to/your/data"
+    ```
+    
+    The `DATA_DIR` placeholder is referenced throughout configuration files for data, checkpoints, and outputs. Make sure this is an **existing absolute path**.
+  </Step>
+
+  <Step title="Verify Installation">
+    Test your installation by running a simple script:
+    
+    ```bash
+    python scripts/run_motionscope.py
+    ```
+    
+    You should see the Motionscope viewer launch. If you get configuration errors about missing motions, proceed to the Quick Start guide.
+  </Step>
+</Steps>
+
+## Optional: Isaac Gym Setup
+
+<Warning>
+Isaac Gym is **only required** if you want to train motion tracking controllers. The motion diffusion model and Motionscope viewer work without Isaac Gym.
+</Warning>
+
+Isaac Gym is NVIDIA's deprecated physics simulator used for PARC's motion tracking module. While deprecated, it's still functional for this use case.
+
+### Why Isaac Gym?
+
+PARC's tracking environment was built on an early version of MimicKit using Isaac Gym. For new projects, consider using the recommended open-source alternative: [MimicKit](https://github.com/xbpeng/MimicKit).
+
+### Installation Process
+
+<Steps>
+  <Step title="Download Isaac Gym">
+    Register and download Isaac Gym from NVIDIA:
+    
+    [https://developer.nvidia.com/isaac-gym](https://developer.nvidia.com/isaac-gym)
+  </Step>
+
+  <Step title="Create Isaac Gym Environment">
+    Use the Isaac Gym installation script within a conda environment. Create a helper YAML file:
+    
+    ```yaml isaac_gym_env.yaml
+    name: parc
+    channels:
+      - pytorch
+      - conda-forge
+      - defaults
+    dependencies:
+      - python=3.8.20
+      - pytorch=2.2.0
+      - torchvision=0.9.1
+      - cudatoolkit=11.1
+      - pyyaml>=5.3.1
+      - scipy>=1.5.0
+      - tensorboard>=2.2.1
+    ```
+    
+    Then create the environment:
+    ```bash
+    conda env create -f isaac_gym_env.yaml
+    ```
+  </Step>
+
+  <Step title="Install Isaac Gym">
+    Follow the Isaac Gym installation instructions from their documentation. Typically:
+    
+    ```bash
+    cd isaacgym/python
+    pip install -e .
+    ```
+  </Step>
+
+  <Step title="Install PARC in Isaac Gym Environment">
+    After Isaac Gym is installed, install PARC's remaining dependencies:
+    
+    ```bash
+    pip install -r requirements.txt
+    ```
+  </Step>
+</Steps>
+
+## Download Pre-trained Models & Datasets
+
+PARC provides pre-trained models and motion datasets on HuggingFace:
+
+<Card title="PARC Dataset" icon="database" href="https://huggingface.co/datasets/mxucg/PARC">
+  Download datasets from initial iteration and each PARC training stage
+</Card>
+
+### Available Datasets
+
+- **Dec 2024 experiment**: 4 PARC iterations
+- **April 2025 experiment**: 5 PARC iterations  
+- **Small model**: ~30 MB checkpoint files
+
+The datasets include:
+- Motion sequences with terrain data
+- Trained motion diffusion models
+- Tracking controller checkpoints
+
+### Loading Motion Data
+
+Motion files are loaded using:
+- `PARC/anim/motion_lib.py` - Motion library utilities
+- `PARC/anim/kin_char_model.py` - Character model definitions
+
+To view motions, edit the `motion_filepath` parameter in `PARC/motionscope/motionscope_config.yaml`.
+
+<Note>
+**Standalone Data Reading**: If you only want to read motion data without installing PARC, use `scripts/read_motion_data.py` - it only requires NumPy and optionally PyTorch.
+</Note>
+
+## Troubleshooting
+
+### PyTorch CUDA Not Detected
+
+If `torch.cuda.is_available()` returns `False`:
+
+1. Verify NVIDIA driver installation: `nvidia-smi`
+2. Check CUDA version compatibility with PyTorch 2.2.0
+3. Reinstall PyTorch with explicit CUDA version (see Step 4 above)
+
+### Import Errors
+
+If you encounter import errors when running scripts:
+
+```bash
+# Install PARC as editable package
+pip install -e .
+```
+
+### Polyscope Won't Launch
+
+Polyscope requires OpenGL. On headless servers:
+- Use X11 forwarding or VNC
+- Consider running Motionscope locally after downloading motion files
+
+### Old Dataset Format
+
+If using datasets from the old SharePoint release (password: "PARC"), note that the file format is only compatible with PARC v0.1. Use the new HuggingFace datasets for the current version.
+
+## Next Steps
+
+With PARC installed, you're ready to:
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Run Motionscope to visualize motions and start experimenting
+  </Card>
+  <Card title="PARC Guide" icon="book" href="/parc-guide">
+    Learn about the 4-stage PARC training loop and key components
+  </Card>
+</CardGroup>

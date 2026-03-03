@@ -1,0 +1,304 @@
+---
+title: "parc_2_kin_gen.py"
+description: "Generate new kinematic motions using the trained MDM model with procedural terrains"
+---
+
+## Overview
+
+The `parc_2_kin_gen.py` script generates new terrain-traversal motions using the trained Motion Diffusion Model. It creates procedural terrains, plans paths, generates candidate motions, applies kinematic selection heuristics, and optimizes the results.
+
+## Purpose
+
+This is **Stage 2** of the PARC pipeline. It:
+- Generates procedural terrains (boxes, paths, stairs, or from files)
+- Plans traversal paths using A* pathfinding
+- Generates motion candidates autoregressively along paths
+- Filters motions based on contact and penetration losses
+- Applies kinematic optimization to refine motions
+- Removes hesitation frames
+- Saves both original and mirrored versions of motions
+
+## Usage
+
+### Basic Command
+
+```bash
+python scripts/parc_2_kin_gen.py --config path/to/kin_gen_config.yaml
+```
+
+### Default Configuration
+
+```bash
+python scripts/parc_2_kin_gen.py
+# Uses: data/configs/parc_2_kin_gen_default.yaml
+```
+
+## Command-Line Arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--config` | No | Path to the kinematic generation configuration YAML file |
+
+## Key Configuration Parameters
+
+### Generation Settings
+
+- **`mdm_model_path`**: Path to trained MDM model checkpoint directory
+- **`num_new_motions`**: Total number of motions to generate
+- **`motion_id_offset`**: Starting ID for numbering generated motions
+- **`save_name`**: Base name for saved motion files
+- **`output_dir`**: Directory for saving raw generated motions
+
+### Procedural Terrain Settings
+
+- **`procgen_mode`**: Terrain generation mode: "BOXES", "PATHS", "STAIRS", or "FILE"
+- **`new_terrain_dim_x`**: Terrain width in grid cells
+- **`new_terrain_dim_y`**: Terrain length in grid cells
+- **`dx`**: Grid cell size in x-direction (meters)
+- **`dy`**: Grid cell size in y-direction (meters)
+- **`simplify_terrain`**: Boolean flag to apply terrain simplification
+- **`first_heading_mode`**: Character start heading: "auto" or "random"
+
+### Terrain Type Configurations
+
+#### BOXES Mode
+```yaml
+boxes:
+  num_boxes: 10
+  min_box_h: -3.0
+  max_box_h: 3.0
+  box_max_len: 10
+  box_min_len: 5
+  max_box_angle: 6.28318530718  # 2π
+  min_box_angle: 0.0
+```
+
+#### PATHS Mode
+```yaml
+paths:
+  num_terrain_paths: 4
+  maxpool_size: 1
+  path_min_height: -2.8
+  path_max_height: 3.0
+  floor_height: -3.0
+```
+
+#### STAIRS Mode
+```yaml
+stairs:
+  min_stair_start_height: -3.0
+  max_stair_start_height: 1.0
+  min_step_height: 0.15
+  max_step_height: 0.25
+  num_stairs: 4
+  min_stair_thickness: 2.0
+  max_stair_thickness: 8.0
+```
+
+#### FILE Mode
+- **`input_terrain_path`**: Path to pickle or YAML file containing pre-made terrains
+
+### Motion Quality Filters
+
+- **`max_contact_loss`**: Maximum allowed contact loss for valid motions
+- **`max_pen_loss`**: Maximum allowed penetration loss
+- **`max_total_loss`**: Maximum allowed total loss
+
+### Path Planning (A* Settings)
+
+```yaml
+astar:
+  min_start_end_xy_dist: 20.0  # Minimum distance between start and end
+  # Additional A* parameters...
+```
+
+### MDM Path Generation Settings
+
+```yaml
+mdm_path:
+  mdm_batch_size: 32  # Number of candidate motions per generation
+  top_k: 3  # Number of best motions to keep
+  # Additional generation parameters...
+```
+
+### Optimization Settings
+
+- **`use_opt`**: Boolean flag to enable kinematic optimization
+- **`remove_hesitation`**: Boolean flag to remove hesitation frames
+- **`only_gen`**: Boolean flag to only generate terrains without motions (for debugging)
+
+#### Optimization Parameters (when `use_opt: true`)
+
+```yaml
+opt:
+  device: "cuda:0"
+  output_dir: "path/to/optimized_output"
+  char_model: "path/to/character_model.yaml"
+  num_iters: 100
+  step_size: 0.01
+  
+  # Loss weights
+  w_root_pos: 1.0
+  w_root_rot: 1.0
+  w_joint_rot: 1.0
+  w_smoothness: 0.1
+  w_penetration: 10.0
+  w_contact: 5.0
+  w_sliding: 2.0
+  w_body_constraints: 1.0
+  w_jerk: 0.5
+  max_jerk: 100.0
+  
+  use_wandb: false
+  auto_compute_body_constraints: true
+  
+  # Character point sampling for collision detection
+  char_point_samples:
+    sphere_num_subdivisions: 2
+    box_num_slices: 3
+    box_dim_x: 0.5
+    box_dim_y: 0.5
+    capsule_num_circle_points: 8
+    capsule_num_sphere_subdivisions: 2
+    capsule_num_cylinder_slices: 3
+```
+
+## Generation Pipeline
+
+For each motion to generate:
+
+1. **Generate Terrain**: Create procedural terrain based on `procgen_mode`
+2. **Plan Path**: Use A* to find traversal path on terrain
+3. **Generate Candidates**: Use MDM to generate `mdm_batch_size` candidate motions
+4. **Filter by Quality**: Keep motions below loss thresholds
+5. **Select Top K**: Choose the `top_k` best motions
+6. **Optimize**: Apply kinematic optimization (if enabled)
+7. **Post-process**: Remove hesitation frames (if enabled)
+8. **Save**: Save optimized motion and flipped version with terrain data
+
+## Example Configuration
+
+```yaml
+# Model and generation
+mdm_model_path: "$DATA_DIR/iteration_1/p1_train_gen/checkpoints"
+num_new_motions: 50
+motion_id_offset: 0
+save_name: "terrain_motion"
+output_dir: "$DATA_DIR/iteration_1/p2_kin_gen/raw"
+
+# Terrain generation
+procgen_mode: "BOXES"
+new_terrain_dim_x: 100
+new_terrain_dim_y: 100
+dx: 0.05
+dy: 0.05
+simplify_terrain: true
+first_heading_mode: "random"
+
+# Quality thresholds
+max_contact_loss: 0.5
+max_pen_loss: 0.3
+max_total_loss: 1.0
+
+# Optimization
+use_opt: true
+remove_hesitation: true
+only_gen: false
+
+# A* pathfinding
+astar:
+  min_start_end_xy_dist: 20.0
+
+# MDM generation
+mdm_path:
+  mdm_batch_size: 32
+  top_k: 3
+
+mdm_gen:
+  # MDM generation settings...
+
+# Terrain type configs
+boxes:
+  num_boxes: 10
+  min_box_h: -3.0
+  max_box_h: 3.0
+  box_max_len: 10
+  box_min_len: 5
+
+# Optimization settings
+opt:
+  device: "cuda:0"
+  output_dir: "$DATA_DIR/iteration_1/p2_kin_gen/optimized"
+  num_iters: 100
+  use_wandb: false
+  # ... additional opt params
+```
+
+## Output Files
+
+For each generated motion batch:
+
+```
+output_dir/
+├── <motion_name>_<id>_0.pkl
+├── <motion_name>_<id>_1.pkl
+├── <motion_name>_<id>_2.pkl  # top_k variants
+└── ...
+
+opt/output_dir/  # If optimization enabled
+├── <motion_name>_<id>_0_opt.pkl
+├── <motion_name>_<id>_1_opt.pkl
+├── <motion_name>_<id>_2_opt.pkl
+├── flipped/
+│   ├── <motion_name>_<id>_0_opt_flipped.pkl
+│   ├── <motion_name>_<id>_1_opt_flipped.pkl
+│   └── ...
+└── log/
+    ├── log_<motion_name>_<id>_0.txt
+    └── ...
+```
+
+Each `.pkl` file contains:
+- Motion frames (root position, rotation, joint rotations, contacts)
+- Terrain heightfield data
+- Path nodes
+- Heightfield mask indices
+- Loss values and metadata
+
+## Parallel Batch Execution
+
+The `parc_0_setup_iter.py` script generates multiple config files for parallel execution:
+
+```bash
+# Run multiple batches in parallel (e.g., on a cluster)
+python scripts/parc_2_kin_gen.py --config output/p2_kin_gen/batch_0_49/kin_gen_config.yaml &
+python scripts/parc_2_kin_gen.py --config output/p2_kin_gen/batch_50_99/kin_gen_config.yaml &
+python scripts/parc_2_kin_gen.py --config output/p2_kin_gen/batch_100_149/kin_gen_config.yaml &
+```
+
+## Implementation Details
+
+### Key Modules
+
+- **`parc/motion_synthesis/procgen/astar.py`**: A* pathfinding on terrain graphs
+- **`parc/motion_synthesis/procgen/mdm_path.py`**: Autoregressive motion generation along paths
+- **`parc/motion_synthesis/motion_opt/motion_optimization.py`**: Kinematic optimization
+- **`parc/util/terrain_util.py`**: Terrain generation and manipulation
+- **`parc/util/motion_edit_lib.py`**: Motion editing utilities (hesitation removal, flipping)
+
+## Usage in PARC Pipeline
+
+```bash
+# Stage 1: Train generator
+python scripts/parc_1_train_gen.py --config configs/train_gen.yaml
+
+# Stage 2: Generate motions (THIS SCRIPT)
+python scripts/parc_2_kin_gen.py --config configs/kin_gen.yaml
+
+# Stage 3: Train tracker
+python scripts/parc_3_tracker.py --config configs/tracker.yaml
+```
+
+## Location
+
+`scripts/parc_2_kin_gen.py`

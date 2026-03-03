@@ -1,0 +1,627 @@
+---
+title: 'Motion Data Format'
+description: 'Motion file format, frame structure, and how to read motion data'
+---
+
+## Overview
+
+PARC uses a custom `.ms` file format for storing motion data, terrain information, and associated metadata. The format is based on Python's pickle serialization with structured data classes.
+
+**Key Features:**
+- Compact binary format
+- Stores motion, terrain, and metadata together
+- NumPy/PyTorch compatible
+- Support for looping and non-looping motions
+
+**Source:** `PARC/util/file_io.py` and `PARC/util/file_io_helper.py`
+
+## File Structure
+
+### MSFileData Container
+
+The top-level data structure:
+
+```python
+@dataclass
+class MSFileData:
+    motion_data: Optional[MSMotionData] = None
+    terrain_data: Optional[MSTerrainData] = None  
+    misc_data: Optional[Dict[str, Any]] = None
+```
+
+**Source:** `PARC/util/file_io.py`
+
+### MSMotionData
+
+Stores the actual motion frames:
+
+```python
+@dataclass  
+class MSMotionData:
+    root_pos: np.ndarray        # Shape: (num_frames, 3)
+    root_rot: np.ndarray        # Shape: (num_frames, 4) - quaternions
+    joint_rot: np.ndarray       # Shape: (num_frames, num_joints, 4)
+    body_contacts: np.ndarray   # Shape: (num_frames, num_bodies) - optional
+    fps: float                  # Frames per second
+    loop_mode: str             # "WRAP" or "CLAMP"
+```
+
+**Fields:**
+- `root_pos` - 3D position of character root (typically pelvis)
+- `root_rot` - Quaternion rotation (w, x, y, z)
+- `joint_rot` - Per-joint quaternion rotations  
+- `body_contacts` - Binary contact labels (0=no contact, 1=contact)
+- `fps` - Playback framerate (typically 30 or 60)
+- `loop_mode` - How motion repeats
+
+**Source:** `PARC/util/file_io.py`
+
+### MSTerrainData
+
+Stores heightfield terrain:
+
+```python
+@dataclass
+class MSTerrainData:
+    hf: np.ndarray              # Shape: (height, width)
+    hf_maxmin: np.ndarray       # Shape: (2,) - [min_height, max_height]  
+    min_point: np.ndarray       # Shape: (2,) - [min_x, min_y]
+    dx: float                   # Grid cell size in meters
+```
+
+**Fields:**
+- `hf` - 2D elevation grid (height values)
+- `hf_maxmin` - Min and max heights for normalization
+- `min_point` - World position of grid origin
+- `dx` - Horizontal spacing between grid cells
+
+**Source:** `PARC/util/file_io.py`
+
+### Misc Data
+
+Optional metadata dictionary:
+
+```python
+misc_data = {
+    # Heightfield masking for optimization
+    "hf_mask_inds": List[np.ndarray],
+    
+    # Body position constraints for kinematic optimization  
+    "opt:body_constraints": List[BodyConstraint],
+    
+    # Path planning nodes
+    "path_nodes": np.ndarray,  # Shape: (num_nodes, 2)
+    
+    # Offset for terrain alignment
+    "min_point_offset": np.ndarray,  # Shape: (2,)
+    
+    # Rendering/visualization
+    "cam_params": dict,
+    "obs": dict,
+}
+```
+
+**Source:** `PARC/util/file_io_helper.py:12-18`
+
+## Reading Motion Files
+
+### Using File I/O Helper
+
+```python
+import torch
+from parc.util import file_io_helper
+
+# Load motion file
+device = torch.device("cuda:0")
+file_data = file_io_helper.load_ms_file(
+    filepath="motion_001.ms",
+    device=device
+)
+
+# Access motion data
+motion = file_data.motion_data
+root_pos = motion.root_pos      # Tensor on GPU
+root_rot = motion.root_rot      # Quaternions
+joint_rot = motion.joint_rot
+fps = motion.fps
+
+# Access terrain
+terrain = file_data.terrain_data
+if terrain is not None:
+    heightfield = terrain.hf
+    min_point = terrain.min_point
+    dx = terrain.dx
+
+# Access metadata  
+misc = file_data.misc_data
+if misc is not None:
+    path_nodes = misc.get("path_nodes", None)
+```
+
+**Source:** `PARC/util/file_io_helper.py:168-220`
+
+<Note>
+`load_ms_file` automatically converts NumPy arrays to PyTorch tensors on the specified device.
+</Note>
+
+### Using Motion Library
+
+The `MotionLib` class provides high-level access:
+
+```python
+from parc.anim.motion_lib import MotionLib
+from parc.anim.kin_char_model import KinCharModel
+
+# Load character model
+char_model = KinCharModel(device="cuda:0")
+char_model.load_char_file("character.xml")
+
+# Load motion library from YAML file
+mlib = MotionLib.from_file(
+    motion_file="motions.yaml",  # Can list multiple .ms files
+    char_model=char_model,
+    device="cuda:0",
+    contact_info=True  # Load contact labels
+)
+
+# Query motions
+num_motions = mlib.num_motions()
+total_length = mlib.get_total_length()  # Total seconds
+
+# Sample random motion IDs
+motion_ids = mlib.sample_motions(n=64)  # Batch of 64
+
+# Sample random times within motions
+times = mlib.sample_time(motion_ids, truncate_time=0.5)
+
+# Get motion frames at specific times
+root_pos, root_rot, root_vel, root_ang_vel, joint_rot, dof_vel, contacts = \
+    mlib.calc_motion_frame(motion_ids, times)
+```
+
+**Source:** `PARC/anim/motion_lib.py:24-530`
+
+### Batched Access
+
+```python
+# Get all frames for a specific motion
+motion_id = 5
+frames = mlib.get_frames_for_id(motion_id, compute_fk=True)
+
+# Access frame data
+root_pos = frames.root_pos      # Shape: (num_frames, 3)
+root_rot = frames.root_rot      # Shape: (num_frames, 4)  
+joint_rot = frames.joint_rot    # Shape: (num_frames, num_joints, 4)
+body_pos = frames.body_pos      # Shape: (num_frames, num_bodies, 3) - if compute_fk=True
+body_rot = frames.body_rot      # Shape: (num_frames, num_bodies, 4)
+contacts = frames.contacts      # Shape: (num_frames, num_bodies)
+```
+
+**Source:** `PARC/anim/motion_lib.py:485-505`
+
+## Writing Motion Files
+
+### Basic Save
+
+```python
+from parc.util import file_io_helper
+from parc.util.motion_util import MotionFrames
+import torch
+
+# Create motion frames
+motion_frames = MotionFrames(
+    root_pos=torch.randn(100, 3),              # 100 frames
+    root_rot=torch.randn(100, 4),
+    joint_rot=torch.randn(100, 15, 4),         # 15 joints
+    contacts=torch.zeros(100, 15)
+)
+
+# Normalize quaternions
+motion_frames.root_rot = normalize_quaternions(motion_frames.root_rot)
+motion_frames.joint_rot = normalize_quaternions(motion_frames.joint_rot)
+
+# Save to file
+file_io_helper.save_ms_file(
+    filepath="new_motion.ms",
+    motion_frames=motion_frames,
+    fps=30.0,
+    loop_mode="CLAMP",
+    terrain=None,  # Optional
+    hf_mask_inds=None,
+    body_constraints=None,
+    min_point_offset=None,
+    path_nodes=None
+)
+```
+
+**Source:** `PARC/util/file_io_helper.py:97-166`
+
+### With Terrain
+
+```python
+from parc.util.terrain_util import SubTerrain
+
+# Create terrain
+terrain = SubTerrain(
+    hf=torch.randn(64, 64),          # 64x64 heightfield
+    min_point=torch.tensor([0.0, 0.0]),
+    dxdy=torch.tensor([0.1, 0.1])    # 10cm grid cells
+)
+
+# Save with terrain
+file_io_helper.save_ms_file(
+    filepath="motion_with_terrain.ms",
+    motion_frames=motion_frames,
+    fps=30.0,
+    loop_mode="WRAP",
+    terrain=terrain
+)
+```
+
+### With Metadata
+
+```python
+# Create custom metadata
+extra_misc_data = {
+    "motion_type": "walk",
+    "difficulty": 0.7,
+    "tags": ["forward", "flat_ground"]
+}
+
+file_io_helper.save_ms_file(
+    filepath="motion_with_metadata.ms",  
+    motion_frames=motion_frames,
+    fps=60.0,
+    loop_mode="CLAMP",
+    terrain=terrain,
+    extra_misc_data=extra_misc_data
+)
+```
+
+**Source:** `PARC/util/file_io_helper.py:158-159`
+
+## Frame Structure
+
+### Coordinate System
+
+- **X-axis:** Forward direction
+- **Y-axis:** Left direction  
+- **Z-axis:** Up direction
+- **Right-handed** coordinate system
+
+### Quaternion Convention
+
+**Format:** (w, x, y, z)  
+**Order:** Scalar-first (w is the real part)
+
+```python
+# Example quaternion (identity rotation)
+identity = torch.tensor([1.0, 0.0, 0.0, 0.0])
+
+# Always normalize after operations
+quat = quat / torch.norm(quat, dim=-1, keepdim=True)
+```
+
+### Joint Hierarchy
+
+Joint indices correspond to character model definition:
+
+```xml
+<!-- Example character.xml -->
+<joint name="pelvis" idx="0" />
+<joint name="torso" idx="1" parent="0" />
+<joint name="head" idx="2" parent="1" />
+<joint name="right_thigh" idx="3" parent="0" />
+<joint name="right_shin" idx="4" parent="3" />
+<!-- ... -->
+```
+
+Joint rotations are in local space (relative to parent).
+
+### Contact Labels
+
+Binary labels per body:
+
+```python
+contacts[frame_idx, body_idx] = 1.0  # Contact
+contacts[frame_idx, body_idx] = 0.0  # No contact
+```
+
+Typically contact detected when body is within threshold of ground:
+
+```python
+contact = body_height < contact_threshold  # e.g., 0.05 meters
+```
+
+## Loop Modes
+
+### CLAMP
+
+Motion plays once and holds final pose:
+
+```python
+time = 0.0
+while time <= motion_length:
+    frame = get_frame_at_time(time)
+    time += dt
+
+# After motion_length, keep returning last frame
+final_frame = get_frame_at_time(motion_length)
+```
+
+### WRAP
+
+Motion loops seamlessly:
+
+```python
+time = 0.0
+while True:
+    # Wrap time to [0, motion_length]
+    wrapped_time = time % motion_length
+    frame = get_frame_at_time(wrapped_time)
+    time += dt
+```
+
+**Root position offset** added per loop:
+
+```python
+loop_count = floor(time / motion_length)
+root_offset = loop_count * (final_root_pos - initial_root_pos)
+root_offset[2] = 0  # No vertical offset
+
+final_root_pos = base_root_pos + root_offset
+```
+
+**Source:** `PARC/anim/motion_lib.py:440-457`
+
+## Dataset YAML Format
+
+Multiple motion files organized in YAML:
+
+```yaml
+motions:
+  - file: "data/walk/walk_001.ms"
+    weight: 1.0
+  
+  - file: "data/walk/walk_002.ms"  
+    weight: 1.0
+  
+  - file: "data/run/run_001.ms"
+    weight: 2.0  # Sample twice as often
+  
+  - file: "data/climb/climb_001.ms"
+    weight: 0.5  # Sample half as often
+```
+
+Weights control sampling probability during training.
+
+**Source:** `PARC/anim/motion_lib.py:403-423`
+
+## Motion Frames Utility Class
+
+```python
+from parc.util.motion_util import MotionFrames
+
+# Create
+frames = MotionFrames(
+    root_pos=root_pos,
+    root_rot=root_rot,  
+    joint_rot=joint_rot,
+    body_pos=body_pos,  # Optional (from FK)
+    body_rot=body_rot,  # Optional (from FK)
+    contacts=contacts    # Optional
+)
+
+# Check dimensions
+frames.assert_num_dims(2)  # (num_frames, ...)
+
+# Get copy on different device  
+frames_cpu = frames.get_copy(device="cpu")
+
+# Convert to dict
+frame_dict = frames.to_dict()
+```
+
+**Source:** `PARC/util/motion_util.py`
+
+## Heightfield Format
+
+### Grid Structure
+
+```python
+hf = np.array([
+    [0.0, 0.0, 0.1, 0.2],  # Row 0 (Y = min_y)
+    [0.0, 0.1, 0.2, 0.3],  # Row 1
+    [0.1, 0.2, 0.3, 0.4],  # Row 2
+    [0.2, 0.3, 0.4, 0.5],  # Row 3 (Y = max_y)
+])  # Columns: X = min_x to max_x
+```
+
+### World Coordinates
+
+```python
+def grid_to_world(i, j, hf, min_point, dx, dy):
+    """Convert grid indices to world coordinates."""
+    x = min_point[0] + j * dx
+    y = min_point[1] + i * dy  
+    z = hf[i, j]
+    return np.array([x, y, z])
+
+def world_to_grid(world_pos, min_point, dx, dy):
+    """Convert world coordinates to grid indices."""
+    j = int((world_pos[0] - min_point[0]) / dx)
+    i = int((world_pos[1] - min_point[1]) / dy)
+    return i, j
+```
+
+### Normalization
+
+Heightfields are often normalized:
+
+```python
+# Normalize to [-1, 1]
+hf_normalized = hf / max_h
+
+# Denormalize
+hf = hf_normalized * max_h
+```
+
+**Source:** `PARC/motion_generator/mdm.py:338-342`
+
+## Common Operations
+
+### Interpolate Between Frames
+
+```python
+def interpolate_frames(frame0, frame1, alpha):
+    """Linear interpolation for positions, slerp for rotations."""
+    root_pos = (1 - alpha) * frame0.root_pos + alpha * frame1.root_pos
+    root_rot = slerp(frame0.root_rot, frame1.root_rot, alpha)
+    joint_rot = slerp(frame0.joint_rot, frame1.joint_rot, alpha)
+    
+    return MotionFrames(
+        root_pos=root_pos,
+        root_rot=root_rot,
+        joint_rot=joint_rot
+    )
+```
+
+**Source:** `PARC/anim/motion_lib.py:94-126`
+
+### Compute Velocities
+
+```python
+def compute_velocities(frames, fps):
+    """Compute velocities via finite differences."""
+    dt = 1.0 / fps
+    
+    # Linear velocity
+    root_vel = (frames.root_pos[1:] - frames.root_pos[:-1]) / dt
+    root_vel = np.concatenate([root_vel, root_vel[-1:]])  # Repeat last
+    
+    # Angular velocity  
+    root_drot = quat_diff(frames.root_rot[:-1], frames.root_rot[1:])
+    root_ang_vel = quat_to_exp_map(root_drot) / dt
+    root_ang_vel = np.concatenate([root_ang_vel, root_ang_vel[-1:]])
+    
+    return root_vel, root_ang_vel
+```
+
+**Source:** `PARC/anim/motion_lib.py:211-222`
+
+### Forward Kinematics
+
+```python
+def forward_kinematics(char_model, root_pos, root_rot, joint_rot):
+    """Compute body positions and rotations from joint angles."""
+    num_frames = root_pos.shape[0]
+    num_bodies = char_model.get_num_joints()
+    
+    body_pos = torch.zeros(num_frames, num_bodies, 3)
+    body_rot = torch.zeros(num_frames, num_bodies, 4)
+    
+    for frame in range(num_frames):
+        body_pos[frame], body_rot[frame] = char_model.forward_kinematics(
+            root_pos[frame],
+            root_rot[frame],  
+            joint_rot[frame]
+        )
+    
+    return body_pos, body_rot
+```
+
+**Source:** `PARC/anim/kin_char_model.py`
+
+## Best Practices
+
+<Tip>
+**Quaternion normalization:** Always normalize quaternions after any mathematical operation (addition, interpolation, prediction from neural networks).
+</Tip>
+
+<Warning>
+**File paths:** Use absolute paths or `parc.util.path_loader.resolve_path()` to handle relative paths consistently across different working directories.
+</Warning>
+
+<Info>
+**Memory efficiency:** For large datasets, use the cached sampler in `parc_1_train_gen.py` rather than loading all motions into memory.
+</Info>
+
+<Note>
+**Terrain alignment:** When saving motions with terrain, ensure the motion's root positions are in the same coordinate frame as the terrain's `min_point`.
+</Note>
+
+## File Format Versioning
+
+The `.ms` format doesn't have explicit versioning. Compatibility ensured by:
+
+1. **Optional fields** - New fields added as optional
+2. **Backward compatibility** - Old loaders ignore unknown misc_data keys  
+3. **Type checking** - Data classes validate structure on load
+
+When extending the format:
+
+```python
+# Add new field to misc_data (preferred)
+misc_data["new_field"] = value
+
+# Or extend MSMotionData (requires updating all loaders)
+@dataclass
+class MSMotionData:
+    # ... existing fields ...
+    new_field: Optional[np.ndarray] = None
+```
+
+## Example: Complete Workflow
+
+```python
+from parc.util import file_io_helper
+from parc.anim.kin_char_model import KinCharModel
+from parc.anim.motion_lib import MotionLib
+import torch
+
+# 1. Load character
+char_model = KinCharModel(device="cuda:0")
+char_model.load_char_file("data/character.xml")
+
+# 2. Load motion library
+mlib = MotionLib.from_file(
+    motion_file="data/motions.yaml",
+    char_model=char_model,
+    device="cuda:0",
+    contact_info=True
+)
+
+# 3. Sample some motions
+motion_ids = mlib.sample_motions(n=4)
+times = mlib.sample_time(motion_ids)
+
+# 4. Get frames
+root_pos, root_rot, _, _, joint_rot, _, contacts = \
+    mlib.calc_motion_frame(motion_ids, times)
+
+# 5. Compute FK
+body_pos, body_rot = char_model.forward_kinematics(
+    root_pos, root_rot, joint_rot
+)
+
+# 6. Create new motion from modified data  
+new_motion = MotionFrames(
+    root_pos=root_pos,
+    root_rot=root_rot,
+    joint_rot=joint_rot,
+    body_pos=body_pos,
+    body_rot=body_rot,
+    contacts=contacts
+)
+
+# 7. Save to file
+file_io_helper.save_ms_file(
+    filepath="data/new_motion.ms",
+    motion_frames=new_motion,
+    fps=30.0,
+    loop_mode="CLAMP",
+    terrain=None
+)
+
+print("Motion saved successfully!")
+```

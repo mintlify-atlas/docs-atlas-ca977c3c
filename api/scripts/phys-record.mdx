@@ -1,0 +1,226 @@
+---
+title: "parc_4_phys_record.py"
+description: "Record physically simulated motions from the trained tracking controller"
+---
+
+## Overview
+
+The `parc_4_phys_record.py` script uses the trained tracking controller to record physically simulated versions of the generated kinematic motions. It runs the tracker on all reference motions in parallel and saves only the successfully tracked motions back to the dataset.
+
+## Purpose
+
+This is **Stage 4** (final stage) of the PARC pipeline. It:
+- Loads the trained tracking controller from Stage 3
+- Loads the kinematic motions generated in Stage 2
+- Simulates tracking all motions in parallel
+- Records only successfully tracked motions (no early terminations)
+- Saves physically plausible motions for the next iteration
+- Handles difficult-to-track motions with retry logic at different start times
+
+## Usage
+
+### Basic Command
+
+```bash
+python scripts/parc_4_phys_record.py --config path/to/phys_record_config.yaml
+```
+
+### Default Configuration
+
+```bash
+python scripts/parc_4_phys_record.py
+# Uses: data/configs/parc_4_phys_record_default.yaml
+```
+
+## Command-Line Arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--config` | No | Path to the physics recording configuration YAML file |
+
+## Key Configuration Parameters
+
+### Model and Environment Files
+
+- **`model_file`**: Path to the trained tracker model (from Stage 3)
+- **`env_file`**: Path to environment configuration YAML
+- **`agent_file`**: Path to agent configuration YAML
+
+### Dataset Configuration
+
+- **`create_dataset_config`**: Path to dataset creation config
+- **`dataset_file`**: Path to motion dataset YAML (automatically set from create_dataset_config)
+
+### Execution Settings
+
+- **`device`**: Device for running inference (e.g., "cuda:0", "cpu")
+- **`output_dir`**: Directory for saving recorded motions and logs
+
+## Recording Process
+
+### Dataset Preparation
+
+1. Loads dataset creation config
+2. Creates unified dataset YAML from generated motion folders
+3. Counts total number of motions in dataset
+4. Sets number of parallel environments equal to number of motions
+
+### Parallel Recording
+
+The script:
+- Spawns one environment per motion
+- Runs all tracking attempts in parallel
+- Records the physically simulated motion trajectory
+- Saves only motions without early termination (successful tracks)
+
+### Retry Logic for Difficult Motions
+
+For motions that fail to track completely:
+- The script re-attempts tracking starting at later time offsets
+- If the full motion can't be tracked, tries starting at 25%, 50%, etc.
+- Saves partial successful segments if full motion tracking fails
+- Gives up after a maximum number of retries
+
+This allows interesting motion segments to be preserved even if other parts are too difficult.
+
+## Example Configuration
+
+```yaml
+# Device
+device: "cuda:0"
+
+# Model and configs from Stage 3
+model_file: "$DATA_DIR/iteration_1/p3_tracker/model.pt"
+env_file: "$DATA_DIR/iteration_1/p3_tracker/dm_env.yaml"
+agent_file: "$DATA_DIR/iteration_1/p3_tracker/agent_config.yaml"
+
+# Dataset to record (from Stage 2)
+create_dataset_config: "$DATA_DIR/iteration_1/p4_phys_record/create_dataset_config.yaml"
+
+# Output
+output_dir: "$DATA_DIR/iteration_1/p4_phys_record"
+```
+
+## Output Files
+
+After recording, the following files and directories are created:
+
+```
+output_dir/
+├── recorded_motions/
+│   ├── <motion_name_1>.pkl  # Successfully tracked motions only
+│   ├── <motion_name_2>.pkl
+│   └── ...
+├── record_env.yaml          # Generated environment config
+├── record_args.txt          # Recording arguments used
+├── terrain.pkl              # Saved terrain data
+└── motions.yaml             # Input dataset reference
+```
+
+### Recorded Motion Files
+
+Each `.pkl` file in `recorded_motions/` contains:
+- Physically simulated motion frames
+- Root positions, rotations, joint rotations
+- Contact states
+- Associated terrain data
+- Metadata about the recording
+
+## Environment Configuration
+
+The script automatically updates the environment config with:
+- Motion dataset file path
+- Terrain save path
+- Output directory for recorded motions
+- Recording mode flag
+
+## Dataset Creation Config
+
+The dataset creation config typically specifies:
+
+```yaml
+folder_paths:
+  - "$DATA_DIR/iteration_1/p2_kin_gen/optimized"
+  # Only kinematic motions from Stage 2
+
+save_path: "$DATA_DIR/iteration_1/p4_phys_record/motions.yaml"
+
+# Additional dataset settings...
+```
+
+## Success Criteria
+
+A motion is considered successfully recorded if:
+- The tracking controller completes the full motion without early termination
+- No catastrophic failures (falling, excessive penetration, etc.)
+- Contact patterns match the reference motion reasonably well
+
+## Usage in Next Iteration
+
+The recorded motions from this stage become part of the training dataset for the next PARC iteration:
+
+```yaml
+# In next iteration's parc_0_setup_iter.yaml
+input_dataset_folder_paths:
+  - "$DATA_DIR/initial_dataset/"  # Original data
+  - "$DATA_DIR/iteration_1/p4_phys_record/recorded_motions/"  # New physics motions
+  - "$DATA_DIR/iteration_2/p4_phys_record/recorded_motions/"  # Even newer motions
+```
+
+## Implementation Details
+
+### Key Files
+
+- **`scripts/run_tracker.py`**: Contains the main recording logic (mode="record")
+- **`parc/motion_tracker/envs/ig_parkour/dm_env.py`**: Environment with recording support
+- **`parc/util/create_dataset.py`**: Dataset creation utilities
+
+### Recording vs Training Mode
+
+The script runs `run_tracker.py` with `--mode record` which:
+- Disables learning (no policy updates)
+- Records state trajectories
+- Saves successful episodes to disk
+- Uses deterministic policy evaluation
+
+## Hardware Requirements
+
+- NVIDIA GPU with CUDA support
+- Isaac Gym installation
+- Sufficient GPU memory for parallel environments (scales with number of motions)
+
+## Typical Recording Times
+
+Recording time depends on:
+- Number of generated motions (~500 motions typical)
+- Motion lengths
+- GPU performance
+- Typically takes 10-60 minutes for a full batch
+
+## Usage in PARC Pipeline
+
+```bash
+# Complete PARC iteration cycle
+python scripts/parc_0_setup_iter.py --config setup.yaml
+python scripts/parc_1_train_gen.py --config output/p1_train_gen/mdm_config.yaml
+python scripts/parc_2_kin_gen.py --config output/p2_kin_gen/batch/kin_gen_config.yaml
+python scripts/parc_3_tracker.py --config output/p3_tracker/tracker.yaml
+python scripts/parc_4_phys_record.py --config output/p4_phys_record/phys_record.yaml  # THIS SCRIPT
+
+# Recorded motions in output/p4_phys_record/recorded_motions/ are now ready
+# for the next iteration!
+```
+
+## Quality Filtering
+
+The automatic filtering (by only saving non-terminated episodes) ensures:
+- Physics plausibility of all recorded motions
+- Natural motion dynamics
+- Contact consistency with terrains
+- No catastrophic failures in the dataset
+
+This is crucial for maintaining dataset quality across iterations and preventing degradation.
+
+## Location
+
+`scripts/parc_4_phys_record.py`

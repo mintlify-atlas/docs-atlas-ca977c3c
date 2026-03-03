@@ -1,0 +1,264 @@
+---
+title: Motion Tracking Controller
+description: Train a physics-based controller to track kinematic reference motions
+---
+
+The motion tracking controller is a reinforcement learning agent that learns to track reference motions in a physics simulation. It enables physics-based playback of the generated kinematic motions.
+
+## Overview
+
+The tracking controller:
+- Uses reinforcement learning (PPO) to train a policy
+- Tracks reference motions from your dataset
+- Handles multiple terrains in parallel environments
+- Outputs a physics-based motion controller
+
+## Quick Start
+
+<Steps>
+  <Step title="Prepare your dataset">
+    Ensure you have a dataset YAML file listing your reference motions:
+    ```yaml
+    motions:
+      - motion_file: "path/to/motion1.pkl"
+        weight: 1.0
+      - motion_file: "path/to/motion2.pkl"
+        weight: 1.0
+    ```
+  </Step>
+
+  <Step title="Configure training">
+    Create or modify your config file:
+    ```yaml
+    env_config: "data/configs/tracker_config/dm_env_default.yaml"
+    agent_config: "data/configs/tracker_config/dm_agent_default.yaml"
+    output_dir: "output/tracker/"
+    dataset_file: "path/to/motions.yaml"
+    num_envs: 2048
+    max_samples: 10000000000
+    device: "cuda:0"
+    ```
+  </Step>
+
+  <Step title="Run training">
+    ```bash
+    python scripts/parc_3_tracker.py --config path/to/config.yaml
+    ```
+    
+    Or use the default config:
+    ```bash
+    python scripts/parc_3_tracker.py --config data/configs/parc_3_tracker_default.yaml
+    ```
+  </Step>
+
+  <Step title="Monitor progress">
+    Training logs are saved to `output_dir/log.txt`. Checkpoints are saved periodically to `output_dir/checkpoints/`.
+  </Step>
+</Steps>
+
+## Configuration Guide
+
+### Main Training Config
+
+```yaml
+env_config: "data/configs/tracker_config/dm_env_default.yaml"
+agent_config: "data/configs/tracker_config/dm_agent_default.yaml"
+output_dir: "output/tracker/iter_1/"
+num_envs: 2048                   # Number of parallel environments
+max_samples: 10000000000         # Maximum training samples
+device: "cuda:0"                 # GPU device
+dataset_file: "path/to/motions.yaml"  # Reference motion dataset
+
+# Optional: continue training from checkpoint
+in_model_file: "path/to/model.pt"  # Set to None to train from scratch
+
+# Optional: auto-create dataset from config
+create_dataset_config: "data/configs/create_dataset_config.yaml"
+```
+
+### Environment Configuration
+
+The environment config (`dm_env_default.yaml`) controls the simulation:
+
+**Key settings**:
+- Motion sampling strategy
+- Terrain loading and generation
+- Episode length and termination conditions
+- Observation and action spaces
+- Reward function weights
+
+**Example structure**:
+```yaml
+env:
+  dm:
+    motion_file: "path/to/motions.yaml"  # Overridden by training script
+    terrain_save_path: "output/terrain.pkl"
+    episode_length: 300
+    
+    # Reward weights
+    reward_weights:
+      position: 1.0
+      rotation: 0.5
+      velocity: 0.1
+      # ... more weights
+```
+
+### Agent Configuration
+
+The agent config (`dm_agent_default.yaml`) defines the RL algorithm:
+
+**Key settings**:
+- Neural network architecture
+- PPO hyperparameters
+- Learning rates
+- Normalization settings
+
+**Example structure**:
+```yaml
+algorithm: "PPO"
+
+network:
+  mlp_units: [1024, 512]
+  activation: "relu"
+
+ppo:
+  learning_rate: 0.0001
+  clip_range: 0.2
+  entropy_coef: 0.01
+  
+normalizer_samples: 10000  # Set to 0 when loading checkpoint
+```
+
+## Training Process
+
+The training script (`parc_3_tracker.py`):
+
+1. Loads or creates the dataset configuration
+2. Modifies environment config with dataset path
+3. Saves modified configs to output directory
+4. Calls the tracker training with appropriate arguments
+5. Saves checkpoints and final model
+
+## Output Structure
+
+```
+output_dir/
+├── log.txt                    # Training log
+├── model.pt                   # Final trained model
+├── dm_env.yaml               # Environment config used
+├── agent_config.yaml         # Agent config used
+├── train_args.txt            # Training arguments
+├── terrain.pkl               # Saved terrain data
+└── checkpoints/
+    ├── model_0000010000.pt
+    ├── model_0000020000.pt
+    └── ...
+```
+
+## Understanding the Training Environment
+
+The training environment (`parc/motion_tracker/envs/ig_parkour/dm_env.py`):
+
+- Loads reference motions and terrains in parallel
+- Samples random starting frames for each episode
+- Computes rewards based on tracking error
+- Handles early termination on tracking failure
+- Arranges terrains in a grid to avoid numerical issues
+
+**Grid arrangement**: Up to ~16,000 terrains can be arranged in parallel, each with its own reference motion.
+
+## Continuing Training
+
+To continue from a checkpoint:
+
+```yaml
+in_model_file: "output/tracker/iter_1/checkpoints/model_0000152400.pt"
+```
+
+**Important**: Set `normalizer_samples: 0` in your agent config when continuing training, as normalization statistics are already computed.
+
+## Important Files
+
+Implementation details:
+- `scripts/parc_3_tracker.py` - Training launcher script  
+- `parc/motion_tracker/run_tracker.py` - Main training loop
+- `parc/motion_tracker/envs/ig_parkour/dm_env.py` - Tracking environment
+- `parc/motion_tracker/envs/ig_parkour/ig_parkour_env.py` - Parent environment wrapper
+
+## Troubleshooting
+
+### Out of Memory
+
+**Symptoms**: CUDA out of memory errors
+
+**Solutions**:
+- Reduce `num_envs` (try 1024 or 512)
+- Reduce network size in agent config
+- Reduce observation history length
+- Use a GPU with more memory
+
+### Training Not Converging
+
+**Symptoms**: Reward not improving, high termination rate
+
+**Solutions**:
+- Check reward weights in environment config
+- Reduce `learning_rate` in agent config
+- Increase episode length for more exploration
+- Verify reference motions are physically plausible
+- Start with simpler terrains before complex ones
+
+### Checkpoints Not Saving
+
+**Symptoms**: No files in `checkpoints/` directory
+
+**Solutions**:
+- Check `output_dir` path is writable
+- Verify checkpoint saving frequency in agent config
+- Ensure training runs long enough to trigger first checkpoint
+
+### Agent Falls Immediately
+
+**Symptoms**: Very short episodes, low reward from start
+
+**Solutions**:
+- Check initial pose matches reference motion
+- Verify terrain is loaded correctly
+- Increase exploration early in training
+- Check PD controller gains in environment config
+
+### Cannot Load Dataset
+
+**Symptoms**: Error opening dataset file
+
+**Solutions**:
+- Verify `dataset_file` path is correct
+- If using `create_dataset_config`, ensure that config is valid
+- Check that motion `.pkl` files exist and are accessible
+- Use absolute paths instead of relative paths
+
+## Advanced: Multi-Iteration Training
+
+In the PARC loop, each iteration:
+1. Trains a new generator on expanded dataset
+2. Generates new motions
+3. Trains tracker on new + old motions  
+4. Records physics-based motions
+5. Adds recorded motions to dataset
+
+For iteration N, load the checkpoint from iteration N-1:
+
+```yaml
+in_model_file: "output/tracker/iter_{N-1}/checkpoints/model_XXXXXXXX.pt"
+```
+
+## Performance Tips
+
+- **GPU memory**: More `num_envs` = faster training but more memory
+- **CPU cores**: Isaac Gym uses CPU for environment stepping
+- **Checkpoint frequency**: Save every 10K-50K samples to balance disk usage and recovery
+- **Terrain complexity**: Start simple, gradually increase difficulty
+
+## Next Steps
+
+After training the controller, proceed to [recording motions](/guides/recording-motions) to generate physics-based motion data.

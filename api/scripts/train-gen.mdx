@@ -1,0 +1,170 @@
+---
+title: "parc_1_train_gen.py"
+description: "Train the Motion Diffusion Model (MDM) for kinematic motion generation"
+---
+
+## Overview
+
+The `parc_1_train_gen.py` script trains a Motion Diffusion Model (MDM) on the current iteration's motion dataset. This model learns to generate kinematic motions conditioned on local heightmaps and target directions.
+
+## Purpose
+
+This is **Stage 1** of the PARC pipeline. It:
+- Trains a motion diffusion model with terrain awareness
+- Uses a weighted motion sampler for balanced training across motion types
+- Supports training from scratch or fine-tuning from a previous checkpoint
+- Logs training progress to Weights & Biases (WandB)
+- Saves model checkpoints periodically
+
+## Usage
+
+### Basic Command
+
+```bash
+python scripts/parc_1_train_gen.py --config path/to/mdm_config.yaml
+```
+
+### Default Configuration
+
+```bash
+python scripts/parc_1_train_gen.py
+# Uses: data/configs/parc_1_train_gen.yaml
+```
+
+## Command-Line Arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--config` | No | Path to the MDM training configuration YAML file |
+
+## Key Configuration Parameters
+
+### Training Parameters
+
+- **`batch_size`**: Number of motion samples per training batch
+- **`epochs`**: Total number of training epochs
+- **`iters_per_epoch`**: Number of iterations per epoch
+- **`epochs_per_checkpoint`**: Save checkpoint every N epochs
+- **`device`**: Training device (e.g., "cuda:0", "cpu")
+
+### Model Parameters
+
+- **`input_model_path`**: Path to pretrained model checkpoint (optional, for fine-tuning)
+- **`motion_lib_file`**: Path to YAML file containing motion dataset
+- **`output_dir`**: Directory for saving checkpoints and logs
+
+### Sampler Parameters
+
+- **`sampler_save_filepath`**: Path to save/load the motion sampler pickle file
+- **`sampler_stats_filepath`**: Path to save/load sampler statistics for normalization
+- **`create_dataset_config`**: Path to dataset creation config (optional)
+
+### WandB Integration
+
+- **`use_wandb`**: Boolean flag to enable Weights & Biases logging
+
+## Training Process
+
+### Motion Sampler Creation
+
+The script uses `MDMHeightfieldContactMotionSampler` which:
+- Loads motion data from the dataset
+- Computes sampling weights for different motion types
+- Pre-processes terrain data for augmentation
+- Can be cached to disk for faster subsequent runs
+
+### Model Initialization
+
+The model can be initialized in two ways:
+
+1. **From scratch**: Creates a new MDM model
+2. **From checkpoint**: Loads a previous model for fine-tuning (useful for iterative training)
+
+### Checkpointing
+
+Checkpoints are saved to `{output_dir}/checkpoints/` at regular intervals. A final model is saved to `{output_dir}/final_model.ckpt`.
+
+## Example Configuration
+
+```yaml
+# Training settings
+batch_size: 32
+epochs: 5000
+iters_per_epoch: 100
+epochs_per_checkpoint: 100
+device: "cuda:0"
+
+# Model paths
+motion_lib_file: "$DATA_DIR/iteration_1/motions.yaml"
+output_dir: "$DATA_DIR/iteration_1/p1_train_gen"
+input_model_path: null  # Start from scratch
+
+# Sampler settings
+sampler_save_filepath: "$DATA_DIR/iteration_1/p1_train_gen/sampler.pkl"
+sampler_stats_filepath: "$DATA_DIR/iteration_1/p1_train_gen/sampler_stats.txt"
+
+# Optional: dataset creation
+create_dataset_config: "configs/create_dataset_config.yaml"
+
+# Logging
+use_wandb: true
+```
+
+## Output Files
+
+After training, the following files are created:
+
+```
+output_dir/
+├── checkpoints/
+│   ├── model_epoch_100.ckpt
+│   ├── model_epoch_200.ckpt
+│   └── ...
+├── final_model.ckpt
+├── sampler.pkl
+├── sampler_stats.txt
+└── mdm_config.yaml
+```
+
+## Training from Previous Iteration
+
+For iterations after the first, you should provide the previous model as a starting point:
+
+```yaml
+input_model_path: "$DATA_DIR/iteration_1/p1_train_gen/final_model.ckpt"
+sampler_stats_filepath: "$DATA_DIR/iteration_1/p1_train_gen/sampler_stats.txt"
+```
+
+This enables:
+- Fine-tuning on the expanded dataset
+- Consistent motion normalization across iterations
+- Faster convergence
+
+## Implementation Details
+
+### Key Classes
+
+- **`MDM`** (`parc/motion_generator/mdm.py`): The motion diffusion model with local heightmap and target direction conditioning
+- **`MDMHeightfieldContactMotionSampler`** (`parc/motion_generator/mdm_heightfield_contact_motion_sampler.py`): Weighted dataset sampler
+- **`MDMTransformer`** (`parc/motion_generator/mdm_transformer.py`): Transformer architecture for the diffusion model
+
+### Fault Handling
+
+The script enables fault handlers for debugging segmentation faults and crashes during training.
+
+## Usage in PARC Pipeline
+
+```bash
+# Stage 0: Setup configs
+python scripts/parc_0_setup_iter.py --config setup.yaml
+
+# Stage 1: Train motion generator (THIS SCRIPT)
+python scripts/parc_1_train_gen.py --config output/p1_train_gen/mdm_config.yaml
+
+# Stage 2: Generate motions
+python scripts/parc_2_kin_gen.py --config output/p2_kin_gen/motion_batch/kin_gen_config.yaml
+```
+
+## Location
+
+`scripts/parc_1_train_gen.py`

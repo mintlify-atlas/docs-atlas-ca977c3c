@@ -1,0 +1,430 @@
+---
+title: MotionScope Viewer
+description: Interactive motion viewer and editor for visualizing and editing character animations
+---
+
+MotionScope is an interactive 3D viewer built on Polyscope for visualizing, editing, and analyzing character motions with terrains. It provides GUI tools for motion editing, contact annotation, terrain manipulation, and more.
+
+## Quick Start
+
+<Steps>
+  <Step title="Configure MotionScope">
+    Edit the config file at `PARC/motionscope/motionscope_config.yaml`:
+    ```yaml
+    load_mdm: False
+    use_contact_info: True
+    use_legacy_file_format: False
+    
+    motions:
+      - ["data/motion_terrains/sfu.pkl", "humanoid"]
+    
+    terrain_mesh_mode: "simple"  # or "greedy"
+    ```
+  </Step>
+
+  <Step title="Launch MotionScope">
+    ```bash
+    python scripts/run_motionscope.py
+    ```
+    
+    The viewer opens with your configured motions loaded.
+  </Step>
+
+  <Step title="Explore the interface">
+    The main window shows:
+    - 3D viewport with character and terrain
+    - Motion playback controls at bottom
+    - GUI panels (toggle in "GUIs" tree menu)
+  </Step>
+</Steps>
+
+## Configuration File
+
+Located at `PARC/motionscope/motionscope_config.yaml`:
+
+### Basic Settings
+
+```yaml
+load_mdm: False                   # Load MDM model for generation
+use_contact_info: True            # Show contact labels
+use_legacy_file_format: False     # Use new file format
+```
+
+### Loading Motions
+
+```yaml
+motions:
+  - ["path/to/motion.pkl", "humanoid"]  # [filepath, character_type]
+  - ["path/to/another.pkl", "humanoid"]
+```
+
+You can load multiple motions at startup.
+
+### Terrain Settings
+
+```yaml
+terrain_mesh_mode: "simple"     # Terrain rendering mode: "simple" or "greedy"
+load_other_motion_terrains: False
+input_folder_dir: "data/terrains/"
+```
+
+### Loading MDM Model
+
+To enable motion generation within MotionScope:
+
+```yaml
+load_mdm: True
+
+mdm_filepaths:
+  main: "path/to/model.ckpt"
+```
+
+## Keyboard Controls
+
+### Playback Controls
+
+- **Space**: Play motion from beginning
+- **E**: Jump to end of motion
+- **Mouse Wheel**: Adjust playback speed
+
+### Editing Controls
+
+- **A**: Set terrain elevation at mouse position (use with Terrain GUI)
+- **C**: Set contact body constraint point at mouse position
+- **N**: Place path node at mouse position (for path planning)
+- **G**: Generate motion using loaded MDM
+
+### Navigation
+
+- **Left Mouse**: Rotate camera
+- **Right Mouse**: Pan camera  
+- **Scroll**: Zoom in/out
+
+## GUI Panels
+
+Access panels via the "GUIs" tree menu.
+
+### Motion Playback GUI
+
+Always visible at the bottom of the screen.
+
+**Controls**:
+- **Paused**: Pause/resume playback
+- **Looping**: Enable/disable loop playback
+- **Previous Frame / Next Frame**: Step through frames
+- **Motion time slider**: Scrub through animation
+
+**Info displayed**:
+- Total frames
+- FPS  
+- Current frame number
+
+### Motion GUI
+
+Edit motion data:
+- Frame-by-frame editing
+- Root position/rotation adjustments
+- Joint rotation modifications
+- Apply transformations
+- Time warping and retiming
+
+### Contact GUI
+
+Edit contact labels for body parts.
+
+**Usage**:
+1. Select body part from dropdown (e.g., left_foot, right_hand)
+2. Set start and end frame indices  
+3. Click "Set Contact" or "Remove Contact"
+4. Labels updated in real-time on the motion
+
+**Body parts** typically include:
+- left_foot, right_foot
+- left_hand, right_hand  
+- left_knee, right_knee
+- pelvis, torso
+
+### Terrain GUI
+
+Edit terrain heightfields.
+
+**Controls**:
+- **Terrain height**: Set elevation value
+- **Mouse size**: Brush radius for elevation changes
+
+**Usage**:
+1. Set desired height and brush size
+2. Hover mouse over terrain
+3. Press **A** to apply elevation at cursor
+
+**Terrain simplification tools**:
+- Flatten regions
+- Smooth heightfield
+- Maxpool operations
+
+### MDM GUI
+
+Generate new motions using the loaded diffusion model.
+
+**Features**:
+- Set target direction
+- Configure generation parameters
+- Generate motion from current state
+- Preview generated candidates
+- Select best motion
+
+**Usage**:
+1. Load MDM via config: `load_mdm: True`
+2. Open MDM GUI
+3. Set target direction with mouse
+4. Press **G** or click "Generate"
+5. Review generated motions
+
+### Optimization GUI
+
+Run kinematic optimization on the current motion.
+
+**Parameters**:
+- Number of iterations
+- Step size
+- Loss weights (smoothness, penetration, contact, etc.)
+
+**Usage**:
+1. Open Optimization GUI
+2. Configure parameters (or use defaults)
+3. Click "Optimize Motion"
+4. View optimized result
+5. Save if satisfied
+
+### Path Planning GUI
+
+Plan paths on terrain using A* pathfinding.
+
+**Features**:
+- Place path nodes with **N** key
+- Visualize path on terrain
+- Adjust A* parameters
+- Generate motions along path
+
+**Workflow**:
+1. Press **N** to place start node
+2. Press **N** again to place end node  
+3. Click "Plan Path" to compute A* path
+4. Use with MDM GUI to generate motion along path
+
+### Recording GUI
+
+Record motions from physics simulation (requires Isaac Gym on Linux).
+
+**Features**:
+- Configure recording settings
+- Launch recording sessions
+- Save recorded motions
+
+### Isaac Gym GUI
+
+**Linux only** - Integrates with Isaac Gym for physics simulation.
+
+**Features**:
+- Launch simulation
+- Visualize physics tracking
+- Debug controller behavior
+
+### Kin Controller GUI
+
+Real-time kinematic control using loaded MDM.
+
+**Features**:
+- Control character with target direction input
+- Real-time motion generation (requires high-end GPU)
+- Interactive character steering
+
+**Performance**:
+- RTX 4090: Real-time
+- RTX 3090: Slower than real-time
+- Lower GPUs: May be too slow
+
+### Help GUI
+
+Quick reference for commands and controls. Press **H** or open via GUIs menu.
+
+## Visibility Controls
+
+Under the "Visibility" tree menu:
+
+- **View motion sequence**: Show/hide motion trail
+- **Motion Sequence Visibility**: Transparency slider
+- **View local hf**: Show local heightfield around character
+- **Local Heightfield Visibility**: Transparency slider  
+- **View shadow**: Show character shadow on terrain
+- **Target direction visible**: Show target direction arrow
+- **Mouse spheres visible**: Show cursor position indicators
+- **Body points visible**: Show character collision points
+- **Viewing character**: Show/hide character mesh
+- **Prev state visible**: Show previous pose overlay
+- **Flag mesh**: Show target flag
+- **Origin axes**: Show world coordinate axes
+
+## Saving
+
+Under the "Saving" tree menu:
+
+### Save Options
+
+- **Save path with motion**: Include path nodes in saved file
+- **Save motion as loop**: Set loop mode to WRAP
+- **Save terrain with motion**: Include terrain heightfield
+
+### Save Current Motion
+
+Click "Save Current Motion" to save to `output/_motions/new_motion.pkl`.
+
+**Saved data includes**:
+- Root positions and rotations
+- Joint rotations  
+- Contact labels
+- FPS and loop mode
+- Terrain (if enabled)
+- Path nodes (if enabled)
+- Body constraints (if computed)
+- Camera parameters (if set)
+
+### Set Saved Camera Params
+
+Click "Set Saved Camera Params" to store the current camera view. This camera pose is saved with the motion for consistent visualization.
+
+### Legacy Save Format
+
+Click "[LEGACY] Save Current Motion" for older file format compatibility.
+
+## File Formats
+
+### Motion File (.pkl)
+
+MotionScope uses pickle files containing:
+
+**MSMotionData**:
+- `root_pos`: Root positions over time
+- `root_rot`: Root rotations (quaternions)
+- `joint_rot`: Joint rotations
+- `body_contacts`: Contact labels per frame
+- `fps`: Frame rate
+- `loop_mode`: "CLAMP" or "WRAP"
+
+**MSTerrainData** (optional):
+- `hf`: Heightfield 2D array  
+- `hf_maxmin`: Min/max height values
+- `min_point`: Terrain origin
+- `dx`: Grid cell size
+
+**Misc data** (optional):
+- `path_nodes`: Path waypoints
+- `hf_mask_inds`: Terrain contact indices
+- `opt:body_constraints`: Body constraint data
+- `cam_params`: Saved camera parameters
+
+## Advanced Features
+
+### Motion Editing Workflow
+
+1. Load motion in MotionScope
+2. Use Motion GUI to adjust poses
+3. Use Contact GUI to refine contact labels
+4. Use Terrain GUI to modify terrain
+5. Use Optimization GUI to smooth results
+6. Save edited motion
+
+### Terrain Editing Workflow  
+
+1. Load or create terrain
+2. Set brush size and height in Terrain GUI
+3. Press **A** while hovering to sculpt
+4. Flatten regions as needed
+5. Save terrain with motion
+
+### Motion Generation Workflow
+
+1. Load MDM model (`load_mdm: True`)
+2. Open MDM GUI and Path Planning GUI
+3. Place path nodes with **N** key
+4. Plan path with A*
+5. Set generation parameters
+6. Press **G** to generate
+7. Review and select best candidate
+8. Optionally optimize with Optimization GUI
+9. Save result
+
+## Troubleshooting
+
+### Cannot Load Motion File
+
+**Symptoms**: Error loading `.pkl` file
+
+**Solutions**:
+- Check file path is correct
+- Verify file format (set `use_legacy_file_format` appropriately)
+- Ensure motion file is not corrupted
+- Try loading with a minimal config
+
+### Terrain Not Visible
+
+**Symptoms**: Character visible but no terrain
+
+**Solutions**:
+- Check motion file includes terrain data
+- Try different `terrain_mesh_mode`: "simple" or "greedy"
+- Verify terrain heightfield is not all zeros
+- Check visibility settings
+
+### Character Looks Wrong
+
+**Symptoms**: Character mesh distorted or in wrong pose
+
+**Solutions**:
+- Verify character model: `"humanoid"` in motions config
+- Check joint rotations are valid quaternions
+- Ensure character definition file exists
+- Try reloading the motion
+
+### MDM Generation Fails
+
+**Symptoms**: Generation produces no output or errors
+
+**Solutions**:
+- Verify MDM model path is correct
+- Check model is compatible with current code version
+- Ensure CUDA device is available  
+- Try generating with simpler parameters first
+
+### Performance Issues
+
+**Symptoms**: Laggy playback, slow interactions
+
+**Solutions**:
+- Reduce motion sequence visibility
+- Hide body points
+- Disable local heightfield visualization
+- Use "simple" terrain mesh mode
+- Close unused GUI panels
+
+## Tips and Best Practices
+
+- **Workflow efficiency**: Keep commonly used GUIs open, close others
+- **Visibility management**: Use transparency sliders to see through overlapping elements
+- **Saving often**: Save incrementally to avoid losing work
+- **Camera views**: Save camera params for consistent presentation
+- **Contact editing**: Edit contacts on a paused motion for precision
+- **Terrain sculpting**: Use small brush sizes for detail, large for broad changes
+
+## Platform Notes
+
+- **Windows/Mac**: Motion viewing, editing, and generation work fully
+- **Linux**: Additional Isaac Gym integration for physics simulation
+- **GPU**: Required for MDM generation; higher-end GPUs for real-time control
+
+## Next Steps
+
+- **View generated motions**: Load motions from [motion synthesis](/guides/motion-synthesis)
+- **Edit contacts**: Refine contact labels for better tracking
+- **Create variants**: Edit and save motion variations
+- **Quality check**: Review motions before using in [tracking](/guides/motion-tracking-controller)
