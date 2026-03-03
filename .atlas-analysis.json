@@ -1,0 +1,127 @@
+{
+  "projectType": "ai-ml",
+  "projectName": "PARC",
+  "projectDescription": "Physics-based Augmentation with Reinforcement Learning for Character Controllers",
+  "theme": "aspen",
+  "primaryColor": "#6366F1",
+  "lightColor": "#818CF8",
+  "darkColor": "#4F46E5",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/overview",
+              "concepts/parc-loop",
+              "concepts/motion-diffusion",
+              "concepts/motion-tracking",
+              "concepts/data-format"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/training-motion-generator",
+              "guides/motion-synthesis",
+              "guides/motion-tracking-controller",
+              "guides/recording-motions",
+              "guides/motionscope-viewer",
+              "guides/configuration"
+            ]
+          },
+          {
+            "group": "Resources",
+            "pages": [
+              "resources/datasets",
+              "resources/citation",
+              "resources/contributing"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Motion Generation",
+            "pages": [
+              "api/motion-generator/mdm",
+              "api/motion-generator/base-generator",
+              "api/motion-generator/motion-sampler"
+            ]
+          },
+          {
+            "group": "Animation",
+            "pages": [
+              "api/anim/motion-lib",
+              "api/anim/kin-char-model"
+            ]
+          },
+          {
+            "group": "Motion Synthesis",
+            "pages": [
+              "api/motion-synthesis/motion-optimization",
+              "api/motion-synthesis/procgen"
+            ]
+          },
+          {
+            "group": "Motion Tracking",
+            "pages": [
+              "api/motion-tracker/environments",
+              "api/motion-tracker/agents",
+              "api/motion-tracker/models"
+            ]
+          },
+          {
+            "group": "Scripts",
+            "pages": [
+              "api/scripts/setup-iter",
+              "api/scripts/train-gen",
+              "api/scripts/kin-gen",
+              "api/scripts/tracker",
+              "api/scripts/phys-record"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Motion Diffusion Model with transformer architecture for terrain-aware motion generation",
+    "Physics-based motion tracking using PPO reinforcement learning",
+    "Iterative self-improving loop that generates and validates new motion data",
+    "Kinematic motion optimization and synthesis pipeline",
+    "Motionscope visualization tool for motion and terrain editing",
+    "Support for complex terrain traversal including climbing, jumping, and parkour movements"
+  ],
+  "publicApiSurface": [
+    "PARC.motion_generator.mdm.MDM",
+    "PARC.motion_generator.base_generator.MotionGenerator",
+    "PARC.motion_generator.motion_sampler.MotionSampler",
+    "PARC.anim.motion_lib.MotionLib",
+    "PARC.anim.kin_char_model.KinCharModel",
+    "PARC.motion_synthesis.motion_opt.motion_optimization.MotionOptimization",
+    "PARC.motion_synthesis.procgen.mdm_path.MDMPath",
+    "PARC.motion_tracker.learning.dm_ppo_agent.DMPPOAgent",
+    "PARC.motion_tracker.envs.ig_parkour.ig_parkour_env.IGParkourEnv",
+    "scripts.parc_0_setup_iter.setup_iter",
+    "scripts.parc_1_train_gen",
+    "scripts.parc_2_kin_gen",
+    "scripts.parc_3_tracker",
+    "scripts.parc_4_phys_record",
+    "scripts.run_motionscope",
+    "scripts.run_optimize_motions",
+    "scripts.run_tracker"
+  ]
+}
